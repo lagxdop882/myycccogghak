@@ -1,4 +1,4 @@
 python-telegram-bot
-anthropic
+openai
 httpx
 beautifulsoup4
