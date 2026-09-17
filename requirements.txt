@@ -1,4 +1,2 @@
 python-telegram-bot
 openai
-httpx
-beautifulsoup4
