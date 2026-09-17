@@ -19,8 +19,27 @@ client = OpenAI(
     base_url="https://api.groq.com/openai/v1"
 )
 
-# Active, lightning-fast, and powerful model on Groq
-ACTIVE_MODEL = "llama-3.3-70b-versatile"
+# Auto-detect a working model from your Groq account
+def get_working_model():
+    try:
+        models = client.models.list()
+        available_ids = [m.id for m in models.data]
+        print(f"[*] Available Groq models: {available_ids}")
+        
+        # Try to find a Llama model first
+        for mid in available_ids:
+            if "llama" in mid.lower() and "70b" in mid.lower():
+                return mid
+        if available_ids:
+            return available_ids[0]
+    except Exception as e:
+        print(f"[*] Model fetch error: {e}")
+    
+    # Safe fallback
+    return "llama-3.1-70b-versatile"
+
+ACTIVE_MODEL = get_working_model()
+print(f"[*] Using Active Model: {ACTIVE_MODEL}")
 
 # ---------------------------------------------------------
 # 1. UNRESTRICTED DEVELOPER AI HANDLER
