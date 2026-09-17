@@ -25,8 +25,17 @@ from telegram.ext import (
 
 TELEGRAM_BOT_TOKEN = "8031306974:AAFUlWwpvWDSeFDM3pjvDDv0_vo2l95wk5U"
 
-# Dynamic Proxy Storage & Smart Failure Tracking
-RAW_PROXIES = []
+# Default Proxies Preloaded
+RAW_PROXIES = [
+    "in-free-proxy.g-w.info:59783",
+    "px241104.pointtoserver.com:10780",
+    "px400501.pointtoserver.com:10780",
+    "px023005.pointtoserver.com:10780",
+    "px051003.pointtoserver.com:10780",
+    "px040805.pointtoserver.com:10780",
+    "px040805.pointtoserver.com:10780"
+]
+
 PROXY_FAIL_COUNTS = {}
 MAX_PROXY_FAILS = 3
 
@@ -44,7 +53,7 @@ url_index = 0
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-api_app = FastAPI(title="Razorpay CC Checker API", version="13.0")
+api_app = FastAPI(title="Razorpay CC Checker API", version="16.0")
 
 class CardRequest(BaseModel):
     cc: str
@@ -85,11 +94,11 @@ async def test_proxy(raw_proxy):
         return False, "Invalid proxy format"
     try:
         async with AsyncSession(impersonate="chrome120") as session:
-            resp = await session.get("https://api.ipify.org", proxy=formatted, timeout=12)
-            if resp.status_code == 200:
-                return True, resp.text.strip()
+            resp = await session.get("https://razorpay.me/@onsiteteams", proxy=formatted, timeout=12)
+            if resp.status_code in [200, 301, 302, 403]:
+                return True, "Proxy is Live & Reachable"
     except Exception as e:
-        return False, str(e)[:45]
+        return False, str(e)[:40]
     return False, "Connection timeout or refused"
 
 def get_rotating_url():
@@ -331,7 +340,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "⚡ **Razorpay UHQ CC Checker Bot is Online!**\n\n"
         "• Send a `.txt` file with `/msa` or drop a single card to start checking.\n"
-        "• Use `/proxy` to manage proxy settings or `/proxyadd` for bulk proxies.",
+        "• Use `/proxy` to add single proxy or `/proxyadd` for bulk proxies.",
         parse_mode="Markdown"
     )
 
@@ -339,7 +348,7 @@ async def proxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
             "⚡ **Proxy Manager Menu**\n\n"
-            "⚡ `/proxy host:port:user:pass` (Add & Test Single Proxy)\n"
+            "⚡ `/proxy host:port:user:pass` (Test & Add Single Proxy)\n"
             "⚡ `/proxyadd` (Bulk Add Proxies line-by-line)\n"
             "⚡ `/myproxy` (View Active Proxies)\n"
             "⚡ `/rmproxy <number>` (Remove Proxy)",
@@ -348,16 +357,16 @@ async def proxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     raw_input = context.args[0].strip()
-    status_msg = await update.message.reply_text("🔍 Testing proxy connectivity before saving...")
+    status_msg = await update.message.reply_text("🔍 Testing proxy live connectivity with Razorpay...")
     
     success, info = await test_proxy(raw_input)
     if success:
         if raw_input not in RAW_PROXIES:
             RAW_PROXIES.append(raw_input)
         await status_msg.edit_text(
-            f"✅ **Proxy Added & Verified Successfully!**\n"
+            f"✅ **Proxy Verified & Added Successfully!**\n"
             f"▸ Proxy: `{raw_input}`\n"
-            f"▸ External IP: `{info}`\n"
+            f"▸ Status: `{info}`\n"
             f"▸ Total Active Proxies: {len(RAW_PROXIES)}",
             parse_mode="Markdown"
         )
@@ -389,7 +398,7 @@ async def proxyadd_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    status_msg = await update.message.reply_text(f"🔍 Testing {len(proxy_lines)} proxies concurrently... Please wait.")
+    status_msg = await update.message.reply_text(f"🔍 Testing {len(proxy_lines)} proxies live against Razorpay... Please wait.")
     
     added_count = 0
     failed_count = 0
@@ -412,7 +421,7 @@ async def proxyadd_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     summary = (
         f"📊 **Bulk Proxy Add Report:**\n\n"
-        f"✅ Added Successfully: {added_count}\n"
+        f"✅ Added Successfully (Live): {added_count}\n"
         f"❌ Dead / Failed: {failed_count}\n"
         f"🛡️ Total Active Proxies: {len(RAW_PROXIES)}\n\n"
         f"**Results Preview:**\n" + "\n".join(results_log[:15])
@@ -427,10 +436,9 @@ async def myproxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ No active proxies saved yet. Use `/proxy` or `/proxyadd` to add them.", parse_mode="Markdown")
         return
     
-    text = "🛡️ **Active Verified Proxies List:**\n\n"
+    text = f"🌐 **Your Proxies ({len(RAW_PROXIES)})**\n\n"
     for idx, p in enumerate(RAW_PROXIES, 1):
         text += f"{idx}. `{p}`\n"
-    text += f"\nTotal Active: {len(RAW_PROXIES)}"
     await update.message.reply_text(text, parse_mode="Markdown")
 
 async def rmproxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
