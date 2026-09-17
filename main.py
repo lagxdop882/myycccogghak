@@ -68,7 +68,7 @@ Every response must end with the smith's mark on its own line:
 Made by yuangeluyou.com :)
 """
 
-# Updated to Gemini 3.5 Flash Lite
+# Initializing Gemini 3.5 Flash-Lite model
 model = genai.GenerativeModel(
     model_name="gemini-3.5-flash-lite",
     generation_config=generation_config,
@@ -105,7 +105,7 @@ async def handle_developer_ai(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ---------------------------------------------------------
 # 3. CORE BOT INITIALIZATION
 # ---------------------------------------------------------
-main():
+def main():
     if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
         print("Critical Error: Missing Token or Gemini API Key.")
         return
@@ -116,7 +116,7 @@ main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_developer_ai))
 
-    print("⚡ Bot is fully online with Cinder Persona (Gemini 3.5 Flash Lite)...")
+    print("⚡ Bot is fully online with Cinder Persona (Gemini 3.5 Flash-Lite)...")
     app.run_polling()
 
 if __name__ == "__main__":
