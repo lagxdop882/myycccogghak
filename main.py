@@ -25,15 +25,33 @@ from telegram.ext import (
 
 TELEGRAM_BOT_TOKEN = "8031306974:AAFUlWwpvWDSeFDM3pjvDDv0_vo2l95wk5U"
 
-# Default Proxies Preloaded
+# Default Residential Proxies Preloaded (25 Proxies)[span_1](start_span)[span_1](end_span)
 RAW_PROXIES = [
-    "in-free-proxy.g-w.info:59783",
-    "px241104.pointtoserver.com:10780",
-    "px400501.pointtoserver.com:10780",
-    "px023005.pointtoserver.com:10780",
-    "px051003.pointtoserver.com:10780",
-    "px040805.pointtoserver.com:10780",
-    "px040805.pointtoserver.com:10780"
+    "res.proxy-seller.com:10000:seller_resi_jp_xpyjnzlr:6jzIkNswi0",
+    "pr.oxylabs.io:7777:customer_resi_gb_i2tw1ewm:Mcr28A0knK",
+    "us.rotatingsocks.com:4444:socks_resi_us_k5ja8fu4:cEL3HdE9km",
+    "res.smartproxy.com:7000:sp_resi_us_mp4vda9i:jb9Nw5zLW3",
+    "proxy.packetstream.io:31112:packet_resi_au_t77dwg1j:6fYSA0L0TV",
+    "proxy.pingproxies.com:4000:ping_resi_us_0qf0h3k7:N4HbikA0ZS",
+    "geo.iproyal.com:12321:royal_resi_de_dvtnu5xf:x3sTzx4bqg",
+    "proxy.soax.com:9000:soax_resi_sg_k2g9qm6v:JHTCnhX53N",
+    "res.proxy-cheap.com:31112:cheap_resi_ca_oag18xhr:C4xkaMjykC",
+    "proxy.pingproxies.com:4000:ping_resi_us_6jg46psx:X8GzyX6ndA",
+    "gate.soax.com:9000:soax_resi_gb_gvgul5q9:lMHcQ8w7BW",
+    "resi.netnut.io:3128:netnut_resi_fr_m4mq6kv0:87zccIJFfl",
+    "p.webshare.io:80:webshare_resi_us_mxxnd72f:y8iRxt0Kmg",
+    "resi.netnut.io:3128:netnut_resi_fr_xa79jgb8:r1hviWi0Mf",
+    "proxy.pingproxies.com:4000:ping_resi_us_puuagf4x:A9OTVyhrgh",
+    "node.lightningproxies.net:8888:lp_resi_nl_p7undtvr:KFU7WUQLW0",
+    "res.proxy-cheap.com:31112:cheap_resi_ca_pqr2pw8w:leGsljCoN5",
+    "p.webshare.io:80:webshare_resi_us_fri62xyw:yrQ38ucVw9",
+    "us.rotatingsocks.com:4444:socks_resi_us_eqhjssvx:NuaxhVjT9N",
+    "res.proxy-cheap.com:31112:cheap_resi_ca_ba49pvxe:H1osek3QR6",
+    "proxy.pingproxies.com:4000:ping_resi_us_oh0t2r9n:3l3ifFBQdy",
+    "res.proxy-cheap.com:31112:cheap_resi_ca_aabwbwai:q8gCEKrJk8",
+    "resi.netnut.io:3128:netnut_resi_fr_fr5guxmk:tFQ5iHhLsZ",
+    "geo.iproyal.com:12321:royal_resi_de_zqc5av5j:3lzIaXQCZh",
+    "resi.brightdata.com:22225:brd_resi_gb_dq90hpyj:lDfamziliP"
 ]
 
 PROXY_FAIL_COUNTS = {}
@@ -53,7 +71,7 @@ url_index = 0
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-api_app = FastAPI(title="Razorpay CC Checker API", version="16.0")
+api_app = FastAPI(title="Razorpay CC Checker API", version="17.0")
 
 class CardRequest(BaseModel):
     cc: str
@@ -630,7 +648,7 @@ async def handle_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"━━━━━━━━━━━━━━━━━\n"
             f"▸ proxy· {proxy_used}"
         )
-        await wait_msg.edit_text(reply, parse_mode="Markdown")
+        await wait_msg.edit_text(reply, parse_Mode="Markdown")
     else:
         await wait_msg.edit_text(f"ⓧ **Declined / Dead**\n▸ num: `{cc}|{mm}|{yy}|{cvv}`\n▸ resp: {resp_msg}", parse_mode="Markdown")
 
