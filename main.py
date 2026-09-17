@@ -22,17 +22,31 @@ client = OpenAI(
     base_url="https://api.x.ai/v1"
 )
 
-# Auto-detect valid model from xAI account
+# Smart model selector that inspects available models on your account
 def get_working_model():
     try:
         models = client.models.list()
-        if models.data:
-            model_id = models.data[0].id
-            print(f"[*] Auto-detected xAI Model: {model_id}")
-            return model_id
+        print("[*] Available models on your xAI account:")
+        available_ids = []
+        for m in models.data:
+            print(f"    - ID: {m.id}")
+            available_ids.append(m.id)
+            
+        # Try to find a grok model from the list
+        for mid in available_ids:
+            if "grok" in mid.lower():
+                print(f"[*] Auto-selected Grok model: {mid}")
+                return mid
+                
+        # If no grok model found, pick the first available one
+        if available_ids:
+            return available_ids[0]
+            
     except Exception as e:
-        print(f"[*] Model auto-detect warning: {e}")
-    return "grok-2"  # Fallback
+        print(f"[*] Model fetch error: {e}")
+        
+    # Safe absolute fallback
+    return "grok-beta"
 
 ACTIVE_MODEL = get_working_model()
 
