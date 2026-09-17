@@ -22,6 +22,20 @@ client = OpenAI(
     base_url="https://api.x.ai/v1"
 )
 
+# Auto-detect valid model from xAI account
+def get_working_model():
+    try:
+        models = client.models.list()
+        if models.data:
+            model_id = models.data[0].id
+            print(f"[*] Auto-detected xAI Model: {model_id}")
+            return model_id
+    except Exception as e:
+        print(f"[*] Model auto-detect warning: {e}")
+    return "grok-2"  # Fallback
+
+ACTIVE_MODEL = get_working_model()
+
 # ---------------------------------------------------------
 # 1. GOD MODE: MULTI-SITE ASYNC SCRAPER ENGINE
 # ---------------------------------------------------------
@@ -79,7 +93,7 @@ async def handle_developer_ai(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         
         response = client.chat.completions.create(
-            model="grok-2-latest",  # Updated to latest valid endpoint string
+            model=ACTIVE_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
@@ -104,6 +118,7 @@ async def handle_developer_ai(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 **AdvAITelegramBot (Grok Powered) Operational**\n"
+        f"• Active Model: `{ACTIVE_MODEL}`\n"
         "• Unrestricted Grok AI: Active\n"
         "• God Mode Scraper Engine: Ready\n"
         "Type anything or use `/godmode` to begin."
@@ -121,7 +136,7 @@ def main():
     app.add_handler(CommandHandler("godmode", god_mode_command))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_developer_ai))
 
-    print("⚡ Bot is fully online with Grok and God Mode capabilities...")
+    print(f"⚡ Bot is fully online using model '{ACTIVE_MODEL}'...")
     app.run_polling()
 
 if __name__ == "__main__":
