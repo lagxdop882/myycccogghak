@@ -16,4 +16,4 @@ COPY . .
 ENV PORT=7070
 EXPOSE 7070
 
-CMD ["python", "ultimate_checker.py"]
+CMD ["python", "main.py"]
