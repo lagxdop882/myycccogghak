@@ -79,7 +79,7 @@ async def handle_developer_ai(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         
         response = client.chat.completions.create(
-            model="grok-2",
+            model="grok-beta",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
