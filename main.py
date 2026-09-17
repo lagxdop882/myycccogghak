@@ -17,7 +17,7 @@ TELEGRAM_BOT_TOKEN = "8031306974:AAFUlWwpvWDSeFDM3pjvDDv0_vo2l95wk5U"
 
 # Initialize Anthropic Claude Client (Env se uthayega ya yahan key daal sakte ho)
 client = anthropic.Anthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY", "tumhari_anthropic_api_key_yahan_daalo")
+    api_key=os.environ.get("ANTHROPIC_API_KEY", "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")
 )
 
 # ---------------------------------------------------------
