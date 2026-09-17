@@ -52,7 +52,7 @@ url_index = 0
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-api_app = FastAPI(title="Razorpay CC Checker API", version="19.0")
+api_app = FastAPI(title="Razorpay CC Checker API", version="20.0")
 
 class CardRequest(BaseModel):
     cc: str
@@ -73,19 +73,24 @@ def format_proxy(raw):
     if not raw: 
         return None
 
-    if "://" not in raw:
-        parts = raw.split(":")
-        if len(parts) == 4:
-            if parts[1].isdigit() and int(parts[1]) < 65536:
-                return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
-            elif parts[3].isdigit() and int(parts[3]) < 65536:
-                return f"http://{parts[0]}:{parts[1]}@{parts[2]}:{parts[3]}"
-            else:
-                return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
-        elif len(parts) == 2:
-            return f"http://{raw}"
+    if "://" in raw:
+        return raw
+
+    parts = raw.split(":")
+    if len(parts) == 4:
+        # Check karo ki port kis position par hai taaki order pata chale
+        if parts[1].isdigit() and int(parts[1]) < 65536:
+            # Format: host:port:user:pass -> http://user:pass@host:port
+            return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
+        elif parts[3].isdigit() and int(parts[3]) < 65536:
+            # Format: user:pass:host:port -> http://user:pass@host:port
+            return f"http://{parts[0]}:{parts[1]}@{parts[2]}:{parts[3]}"
+        else:
+            return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
+    elif len(parts) == 2:
+        return f"http://{raw}"
     
-    return raw
+    return f"http://{raw}"
 
 async def test_proxy(raw_proxy):
     formatted = format_proxy(raw_proxy)
@@ -513,7 +518,6 @@ async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current_gateway_response = gw_resp
             time_elapsed = int(time.time() - start_time)
             
-            # 🔥 Modern & Detailed Live Journey UI Console
             console_text = (
                 f"╔════════════════════════════════════╗\n"
                 f"║      🔥 RAZORPAY UHQ CHECKER       🔥      ║\n"
