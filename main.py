@@ -4,7 +4,6 @@ Owner: @whoh4rsh
 """
 import asyncio, time, random, uuid, logging, os, sqlite3, shutil
 from datetime import datetime
-from threading import Thread
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
@@ -846,26 +845,35 @@ async def on_msg(update, ctx):
     await live.finish(r["status"], r["response"], r["code"])
 
 # ── BOOT ──
-def run_bot():
-    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", cmd_start))
-    app_bot.add_handler(CommandHandler("menu", cmd_menu))
-    app_bot.add_handler(CommandHandler("help", cmd_help))
-    app_bot.add_handler(CommandHandler("myinfo", cmd_myinfo))
-    app_bot.add_handler(CommandHandler("redeem", cmd_redeem))
-    app_bot.add_handler(CommandHandler("feedback", cmd_feedback))
-    app_bot.add_handler(CommandHandler("jio", cmd_jio))
-    app_bot.add_handler(CommandHandler("chk", cmd_chk))
-    app_bot.add_handler(CommandHandler("genkey", cmd_genkey))
-    app_bot.add_handler(CommandHandler("ban", cmd_ban))
-    app_bot.add_handler(CommandHandler("unban", cmd_unban))
-    app_bot.add_handler(CommandHandler("botstats", cmd_botstats))
-    app_bot.add_handler(CommandHandler("users", cmd_users))
-    app_bot.add_handler(CallbackQueryHandler(on_cb))
-    app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), on_msg))
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(run_telegram_bot())
 
-    logger.info(f"🚀 {BOT_NAME} Telegram Bot starting...")
-    app_bot.run_polling()
+async def run_telegram_bot():
+    try:
+        app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
+        app_bot.add_handler(CommandHandler("start", cmd_start))
+        app_bot.add_handler(CommandHandler("menu", cmd_menu))
+        app_bot.add_handler(CommandHandler("help", cmd_help))
+        app_bot.add_handler(CommandHandler("myinfo", cmd_myinfo))
+        app_bot.add_handler(CommandHandler("redeem", cmd_redeem))
+        app_bot.add_handler(CommandHandler("feedback", cmd_feedback))
+        app_bot.add_handler(CommandHandler("jio", cmd_jio))
+        app_bot.add_handler(CommandHandler("chk", cmd_chk))
+        app_bot.add_handler(CommandHandler("genkey", cmd_genkey))
+        app_bot.add_handler(CommandHandler("ban", cmd_ban))
+        app_bot.add_handler(CommandHandler("unban", cmd_unban))
+        app_bot.add_handler(CommandHandler("botstats", cmd_botstats))
+        app_bot.add_handler(CommandHandler("users", cmd_users))
+        app_bot.add_handler(CallbackQueryHandler(on_cb))
+        app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), on_msg))
+
+        logger.info(f"🚀 {BOT_NAME} Telegram Bot starting...")
+        await app_bot.initialize()
+        await app_bot.start()
+        await app_bot.updater.start_polling()
+    except Exception as e:
+        logger.error(f"Bot start error: {e}")
 
 def main():
     db_init()
@@ -875,10 +883,6 @@ def main():
     con.commit(); con.close()
     logger.info(f"🔍 Browser: {get_browser_path()} | HEADLESS: {HEADLESS} | PORT: {PORT}")
     
-    # Telegram Bot running in background thread
-    Thread(target=run_bot, daemon=True).start()
-
-    # FastAPI running in main thread for Railway port binding
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
 
 if __name__ == "__main__":
