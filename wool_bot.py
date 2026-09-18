@@ -21,7 +21,6 @@ from telebot import types
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger("wool")
 
-# ── CONFIG ──
 BOT_TOKEN   = os.getenv("BOT_TOKEN", "")
 OWNER_ID    = int(os.getenv("OWNER_ID", "0"))
 OWNER_TAG   = "@DarkCarder05"
@@ -40,7 +39,6 @@ DELAY_MIN = 3
 DELAY_MAX = 7
 PROXY_MAX_RETRIES = 3
 
-# ── PROXY ──
 PROXY_USER = os.getenv("PROXY_USER", "")
 PROXY_PASS = os.getenv("PROXY_PASS", "")
 
@@ -87,7 +85,6 @@ def masked_proxy(p):
         return p.split("@")[-1]
     return p.replace("http://", "").replace("https://", "")
 
-# ── UA ──
 UAS = [
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -95,10 +92,10 @@ UAS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
 ]
+
 def rand_ua():
     return random.choice(UAS)
 
-# ── EMOJI ──
 EM = {
     "diamond":  ("💎", "5042050649248760772"),
     "crown":    ("👑", "5039727497143387500"),
@@ -145,12 +142,10 @@ for i in range(10):
 def bold(t):
     return "".join(_MB.get(c, c) for c in str(t))
 
-# ── STATE ──
 STOP_FLAG = {"stop": False}
 USER_STATS = {}
 _BIN_CACHE = {}
 
-# ── HELPERS ──
 def luhn_ok(number):
     try:
         digits = [int(d) for d in str(number) if d.isdigit()]
@@ -207,7 +202,6 @@ def bin_lookup(cc):
         _BIN_CACHE[b] = ("UNKNOWN", "UNKNOWN", "UNKNOWN")
         return "UNKNOWN", "UNKNOWN", "UNKNOWN"
 
-# ── DELETE ──
 def extract_delete_link(html, base_url):
     try:
         soup = BeautifulSoup(html, "html.parser")
@@ -271,7 +265,6 @@ def ensure_clean_slate(session):
     except:
         pass
 
-# ── CHECK ──
 def check_card(line):
     parsed = parse_card(line)
     if not parsed:
@@ -512,7 +505,6 @@ def _err(reason, base):
         "proxy": base.get("proxy", "-")
     }
 
-# ── BOT ──
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
 def main_kb(uid):
@@ -534,27 +526,26 @@ def back_kb():
     return kb
 
 def welcome_text(name):
-    parts = [
-        e('crown') + " <b>╔══════════════════════════╗</b> " + e('crown'),
-        "<b>   " + bold('TON B3 CHECKER') + "   </b>",
-        e('diamond') + " <b>╚══════════════════════════╝</b> " + e('diamond'),
-        "",
-        e('wave') + " <b>Welcome " + str(name) + "!</b> " + e('fire'),
-        "",
-        e('bolt') + " <b>Gateway:</b> Braintree (B3) Auth",
-        e('pin') + " <b>Site:</b> <code>woolroots.com</code>",
-        e('shield') + " <b>Proxy:</b> <code>" + str(len(PROXIES)) + " loaded</code>",
-        e('green') + " <b>Status:</b> Online",
-        "",
-        e('top') + " <b>How to check:</b>",
-        "   " + e('arrow_r') + " Send any <code>.txt</code> file with cards",
-        "   " + e('arrow_r') + " Reply to that file with <code>/chk</code>",
-        "   " + e('arrow_r') + " Watch hits roll in " + e('diamond'),
-        "",
-        "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>",
-        e('crown2') + " <b>Bot By " + OWNER_TAG + "</b> " + e('star'),
-    ]
-    return "\n".join(parts)
+    lines = []
+    lines.append(e('crown') + " <b>╔══════════════════════════╗</b> " + e('crown'))
+    lines.append("<b>   " + bold('TON B3 CHECKER') + "   </b>")
+    lines.append(e('diamond') + " <b>╚══════════════════════════╝</b> " + e('diamond'))
+    lines.append("")
+    lines.append(e('wave') + " <b>Welcome " + str(name) + "!</b> " + e('fire'))
+    lines.append("")
+    lines.append(e('bolt') + " <b>Gateway:</b> Braintree (B3) Auth")
+    lines.append(e('pin') + " <b>Site:</b> <code>woolroots.com</code>")
+    lines.append(e('shield') + " <b>Proxy:</b> <code>" + str(len(PROXIES)) + " loaded</code>")
+    lines.append(e('green') + " <b>Status:</b> Online")
+    lines.append("")
+    lines.append(e('top') + " <b>How to check:</b>")
+    lines.append("   " + e('arrow_r') + " Send any <code>.txt</code> file with cards")
+    lines.append("   " + e('arrow_r') + " Reply to that file with <code>/chk</code>")
+    lines.append("   " + e('arrow_r') + " Watch hits roll in " + e('diamond'))
+    lines.append("")
+    lines.append("<b>━━━━━━━━━━━━━━━━━━━━━━━</b>")
+    lines.append(e('crown2') + " <b>Bot By " + OWNER_TAG + "</b> " + e('star'))
+    return "\n".join(lines)
 
 def hit_text(r):
     lines = []
@@ -622,7 +613,6 @@ def summary_text(total, ok, bad, risk, err, delete_fail, elapsed):
     lines.append(e('crown2') + " <b>Bot By " + OWNER_TAG + "</b>")
     return "\n".join(lines)
 
-# ── HANDLERS ──
 @bot.message_handler(commands=["start"])
 def cmd_start(msg):
     name = msg.from_user.first_name or "User"
@@ -676,17 +666,17 @@ def cmd_chk(msg):
         bot.reply_to(msg, e('cross') + " <b>No valid cards</b>")
         return
     STOP_FLAG["stop"] = False
-    start_msg = "\n".join([
-        e(' +fire') + " <b>╔══════════════════════════╗</b> " + e('fire'),
-        "<b>   " + bold('STARTING CHECK') + "   </b>",
-        e('bolt') + " <b>╚══════════════════════════╝</b> " + e('bolt'),
-        "",
-        e('pin') + " <b>File</b> ➤ <code>" + str(doc.file_name) + "</code>",
-        e('cash') + " <b>Cards</b> ➤ <code>" + str(len(parsed)) "</code>",
-        e('shield') + " <b>Proxies</b> ➤ <code>" + str(len(PROXIES)) + "</code>",
-        "",
-        "<i>Rotating every card " + e('reload') + "</i>",
-    ])
+    start_lines = []
+    start_lines.append(e('fire') + " <b>╔══════════════════════════╗</b> " + e('fire'))
+    start_lines.append("<b>   " + bold('STARTING CHECK') + "   </b>")
+    start_lines.append(e('bolt') + " <b>╚══════════════════════════╝</b> " + e('bolt'))
+    start_lines.append("")
+    start_lines.append(e('pin') + " <b>File</b> ➤ <code>" + str(doc.file_name) + "</code>")
+    start_lines.append(e('cash') + " <b>Cards</b> ➤ <code>" + str(len(parsed)) + "</code>")
+    start_lines.append(e('shield') + " <b>Proxies</b> ➤ <code>" + str(len(PROXIES)) + "</code>")
+    start_lines.append("")
+    start_lines.append("<i>Rotating every card " + e('reload') + "</i>")
+    start_msg = "\n".join(start_lines)
     bot.reply_to(msg, start_msg)
     threading.Thread(target=run_check, args=(msg.chat.id, parsed, msg.from_user.id), daemon=True).start()
 
@@ -766,7 +756,6 @@ def _send_hit(chat_id, r):
     except:
         pass
 
-# ── CALLBACKS ──
 @bot.callback_query_handler(func=lambda c: True)
 def on_cb(c):
     d = c.data
@@ -785,13 +774,13 @@ def on_cb(c):
 
     elif d == "ui_proxy":
         lst = "\n".join(e('bolt') + " <code>" + masked_proxy(p) + "</code>" for p in PROXIES)
-        txt = "\n".join([
-            e('shield') + " <b>Proxy Pool (" + str(len(PROXIES)) + ")</b>",
-            "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>",
-            lst,
-            "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>",
-            e('reload') + " Auto-rotate per card",
-        ])
+        txt_lines = []
+        txt_lines.append(e('shield') + " <b>Proxy Pool (" + str(len(PROXIES)) + ")</b>")
+        txt_lines.append("<b>━━━━━━━━━━━━━━━━━━━━━━━</b>")
+        txt_lines.append(lst)
+        txt_lines.append("<b>━━━━━━━━━━━━━━━━━━━━━━━</b>")
+        txt_lines.append(e('reload') + " Auto-rotate per card")
+        txt = "\n".join(txt_lines)
         bot.edit_message_text(
             chat_id=c.message.chat.id, message_id=c.message.message_id,
             text=txt, reply_markup=back_kb(), parse_mode="HTML"
@@ -805,25 +794,25 @@ def on_cb(c):
                 hits = sum(1 for _ in f if not _.startswith("#"))
         except:
             pass
-        txt = "\n".join([
-            e('chart') + " <b>╔══════════════════════════╗</b> " + e('chart'),
-            "<b>   " + bold('YOUR STATS') + "   </b>",
-            e('diamond') + " <b>╚══════════════════════════╝</b> " + e('diamond'),
-            "",
-            e('wave') + " <b>User</b> ➤ <code>" + str(uid) + "</code>",
-            "",
-            e('pin') + " <b>Your checks</b> ➤ <code>" + str(st['total']) + "</code>",
-            e('diamond') + " <b>Approved</b> ➤ <code>" + str(st['ok']) + "</code>",
-            e('cross') + " <b>Declined</b> ➤ <code>" + str(st['bad']) + "</code>",
-            e('warn') + " <b>Risk</b> ➤ <code>" + str(st['risk']) + "</code>",
-            e('skull') + " <b>Error</b> ➤ <code>" + str(st['err']) + "</code>",
-            "",
-            e('shield') + " <b>Proxies</b> ➤ <code>" + str(len(PROXIES)) + "</code>",
-            e('pin') + " <b>Global hits</b> ➤ <code>" + str(hits) + "</code>",
-            "",
-            "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>",
-            e('crown3') + " <b>Bot By " + OWNER_TAG + "</b>",
-        ])
+        txt_lines = []
+        txt_lines.append(e('chart') + " <b>╔══════════════════════════╗</b> " + e('chart'))
+        txt_lines.append("<b>   " + bold('YOUR STATS') + "   </b>")
+        txt_lines.append(e('diamond') + " <b>╚══════════════════════════╝</b> " + e('diamond'))
+        txt_lines.append("")
+        txt_lines.append(e('wave') + " <b>User</b> ➤ <code>" + str(uid) + "</code>")
+        txt_lines.append("")
+        txt_lines.append(e('pin') + " <b>Your checks</b> ➤ <code>" + str(st['total']) + "</code>")
+        txt_lines.append(e('diamond') + " <b>Approved</b> ➤ <code>" + str(st['ok']) + "</code>")
+        txt_lines.append(e('cross') + " <b>Declined</b> ➤ <code>" + str(st['bad']) + "</code>")
+        txt_lines.append(e('warn') + " <b>Risk</b> ➤ <code>" + str(st['risk']) + "</code>")
+        txt_lines.append(e('skull') + " <b>Error</b> ➤ <code>" + str(st['err']) + "</code>")
+        txt_lines.append("")
+        txt_lines.append(e('shield') + " <b>Proxies</b> ➤ <code>" + str(len(PROXIES)) + "</code>")
+        txt_lines.append(e('pin') + " <b>Global hits</b> ➤ <code>" + str(hits) + "</code>")
+        txt_lines.append("")
+        txt_lines.append("<b>━━━━━━━━━━━━━━━━━━━━━━━</b>")
+        txt_lines.append(e('crown3') + " <b>Bot By " + OWNER_TAG + "</b>")
+        txt = "\n".join(txt_lines)
         bot.edit_message_text(
             chat_id=c.message.chat.id, message_id=c.message.message_id,
             text=txt, reply_markup=back_kb(), parse_mode="HTML"
@@ -840,50 +829,49 @@ def on_cb(c):
         else:
             last = lines[-10:][::-1]
             body = "\n".join(e('cash') + " <code>" + l.split(" | ")[0] + "</code>" for l in last)
-            txt = "\n".join([
-                e('diamond') + " <b>Last Hits</b>",
-                "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>",
-                body,
-                "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>",
-                e('chart') + " <b>Total:</b> <code>" + str(len(lines)) + "</code>",
-            ])
+            txt_lines = []
+            txt_lines.append(e('diamond') + " <b>Last Hits</b>")
+            txt_lines.append("<b>━━━━━━━━━━━━━━━━━━━━━━━</b>")
+            txt_lines.append(body)
+            txt_lines.append("<b>━━━━━━━━━━━━━━━━━━━━━━━</b>")
+            txt_lines.append(e('chart') + " <b>Total:</b> <code>" + str(len(lines)) + "</code>")
+            txt = "\n".join(txt_lines)
         bot.edit_message_text(
             chat_id=c.message.chat.id, message_id=c.message.message_id,
             text=txt, reply_markup=back_kb(), parse_mode="HTML"
         )
 
     elif d == "ui_help":
-        txt = "\n".join([
-            e('pin') + " <b>╔══════════════════════════╗</b> " + e('pin'),
-            "<b>   " + bold('HOW TO USE') + "   </b>",
-            e('diamond') + " <b>╚══════════════════════════╝</b> " + e('diamond'),
-            "",
-            e('arrow_r') + " Prepare a <code>.txt</code> file",
-            "   <i>Format: cc|mm|yy|cvv</i>",
-            "   <i>Example: 4111111111111111|12|26|123</i>",
-            "",
-            e('arrow_r') + " Send the file to this bot",
-            "",
-            e('arrow_r') + " Reply with <code>/chk</code>",
-            "",
-            e('arrow_r') + " Watch hits roll in " + e('diamond'),
-            "",
-            "<b>Commands:</b>",
-            "• <code>/start</code> — welcome",
-            "• <code>/chk</code> — check (reply to file)",
-            "• <code>/stop</code> — stop run",
-            "• <code>/proxies</code> — view proxy pool",
-            "• <code>/menu</code> — main menu",
-            "",
-            "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>",
-            e('crown2') + " <b>Bot By " + OWNER_TAG + "</b>",
-        ])
+        txt_lines = []
+        txt_lines.append(e('pin') + " <b>╔══════════════════════════╗</b> " + e('pin'))
+        txt_lines.append("<b>   " + bold('HOW TO USE') + "   </b>")
+        txt_lines.append(e('diamond') + " <b>╚══════════════════════════╝</b> " + e('diamond'))
+        txt_lines.append("")
+        txt_lines.append(e('arrow_r') + " Prepare a <code>.txt</code> file")
+        txt_lines.append("   <i>Format: cc|mm|yy|cvv</i>")
+        txt_lines.append("   <i>Example: 4111111111111111|12|26|123</i>")
+        txt_lines.append("")
+        txt_lines.append(e('arrow_r') + " Send the file to this bot")
+        txt_lines.append("")
+        txt_lines.append(e('arrow_r') + " Reply with <code>/chk</code>")
+        txt_lines.append("")
+        txt_lines.append(e('arrow_r') + " Watch hits roll in " + e('diamond'))
+        txt_lines.append("")
+        txt_lines.append("<b>Commands:</b>")
+        txt_lines.append("• <code>/start</code> — welcome")
+        txt_lines.append("• <code>/chk</code> — check (reply to file)")
+        txt_lines.append("• <code>/stop</code> — stop run")
+        txt_lines.append("• <code>/proxies</code> — view proxy pool")
+        txt_lines.append("• <code>/menu</code> — main menu")
+        txt_lines.append("")
+        txt_lines.append("<b>━━━━━━━━━━━━━━━━━━━━━━━</b>")
+        txt_lines.append(e('crown2') + " <b>Bot By " + OWNER_TAG + "</b>")
+        txt = "\n".join(txt_lines)
         bot.edit_message_text(
             chat_id=c.message.chat.id, message_id=c.message.message_id,
             text=txt, reply_markup=back_kb(), parse_mode="HTML"
         )
 
-# ── MAIN ──
 if __name__ == "__main__":
     if not BOT_TOKEN:
         print("❌ BOT_TOKEN missing! Set env var.")
