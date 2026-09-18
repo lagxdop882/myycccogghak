@@ -654,22 +654,37 @@ def parse_lines(lines):
         if not line: continue
         for sep in ["|","/"," "]:
             p = line.split(sep)
-            if len(p) >= 4: cards.append((p[0],p[1],p[2],p[3])); break
+            if len(p) >= 4: cards.append((p[0].strip(), p[1].strip(), p[2].strip(), p[3].strip())); break
     return cards
 
 async def cmd_chk(update, ctx):
-    u = update.effective_user; ensure_user(u.id, u.username(ch or "")
-    if is_banned(uk.id): await update.message.reply_text_text("(),🚫"); return
-    if not has_access(u.id): await update.message.reply_text("🔑 No key."); return
+    u = update.effective_user
+    ensure_user(u.id, u.username or "")
+    if is_banned(u.id): 
+        await update.message.reply_text("🚫 Banned.")
+        return
+    if not has_access(u.id): 
+        await update.message.reply_text("🔑 No key.")
+        return
+    
     doc = update.message.document or (update.message.reply_to_message and update.message.reply_to_message.document)
-    if not doc: await update.message.reply_text parse_mode="Markdown"); return
+    if not doc: 
+        await update.message.reply_text("⚠️ Please send or reply to a .txt file.", parse_mode="Markdown")
+        return
+        
     status = await update.message.reply_text("📂 Loading...")
     try:
         f = await ctx.bot.get_file(doc.file_id)
         lines = (await f.download_as_bytearray()).decode("utf-8", errors="ignore").splitlines()
         cards = parse_lines(lines)
-    except Exception as e: await status.edit_text(f"⚠️ {e}"); return
-    if not cards: await status.edit_text("⚠️ No cards."); return
+    except Exception as e: 
+        await status.edit_text(f"⚠️ {e}")
+        return
+        
+    if not cards: 
+        await status.edit_text("⚠️ No cards found in file.")
+        return
+        
     await status.delete()
     total = len(cards); start = time.time()
     counts = {"approved":0,"charged":0,"declined":0,"otp":0,"error":0,"limit":0}
@@ -677,22 +692,35 @@ async def cmd_chk(update, ctx):
     header = await update.message.reply_text(
         f"```\n🚀 MASS CHECK STARTED 💎\n📊 Total · {total}\n📱 Jio ₹19\n```",
         parse_mode="Markdown")
+        
     for idx, (cc,mm,yy,cvv) in enumerate(cards, 1):
         masked = f"{cc[:6]}XXXXXX{cc[-4:]}"
-        if not consume_cc(u.id): counts["limit"] += 1; continue
+        if not consume_cc(u.id): 
+            counts["limit"] += 1
+            continue
         proxy = get_proxy() or "direct"
         pd = proxy.split("@")[-1].split("://")[-1] if proxy else "direct"
         live = LiveLogger(ctx.bot, update.effective_chat.id, masked, pd, max_lines=10)
         await live.log(f"Card {idx}/{total}", "🚀")
         r = await jio19_playwright(cc, mm, yy, cvv, proxy=proxy, log_cb=live.log)
-        bump_live(u.id); st = r["status"]; counts[st] = counts.get(st,0)+1
+        bump_live(u.id)
+        st = r["status"]
+        counts[st] = counts.get(st,0)+1
+        
         if st == "otp":
-            bump_otp(); await live.finish("otp", r["response"], r["code"]); await asyncio.sleep(0.5); continue
+            bump_otp()
+            await live.finish("otp", r["response"], r["code"])
+            await asyncio.sleep(0.5)
+            continue
         if st in ("charged","approved"):
-            bump_hit(); hits.append(f"{cc}|{mm}|{yy}|{cvv} — {st.upper()}")
-        elif st == "error": refund_cc(u.id)
+            bump_hit()
+            hits.append(f"{cc}|{mm}|{yy}|{cvv} — {st.upper()}")
+        elif st == "error": 
+            refund_cc(u.id)
+            
         await live.finish(st, r["response"], r["code"])
         await asyncio.sleep(0.5)
+        
     summary = (f"```\n🏁 MASS DONE 💎\n"
         f"📊 Total · {total}\n🕒 Time · {fmt_time(time.time()-start)}\n"
         f"💎 {counts['charged']} ✅ {counts['approved']}\n"
@@ -834,11 +862,12 @@ def main():
     app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("myinfo", cmd_myinfo))
+    app.add_handler(CommandHandlers("redeem" if False else "redeem", cmd_redeem))
     app.add_handler(CommandHandler("redeem", cmd_redeem))
     app.add_handler(CommandHandler("feedback", cmd_feedback))
     app.add_handler(CommandHandler("jio", cmd_jio))
     app.add_handler(CommandHandler("chk", cmd_chk))
-    app.add_handler(CommandHandler("genkey", cmd_genkey))
+    app.add_handler(CommandHandler("Genkey" if False else "genkey", cmd_genkey))
     app.add_handler(CommandHandler("ban", cmd_ban))
     app.add_handler(CommandHandler("unban", cmd_unban))
     app.add_handler(CommandHandler("botstats", cmd_botstats))
