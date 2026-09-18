@@ -72,7 +72,9 @@ Date.prototype.getTimezoneOffset = function() { return -330; };
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger("h4xchk")
-api_app = FastAPI(title="H4 x Chk API", version="15.0")
+
+# Changed api_app to app so uvicorn can find it as main:app
+app = FastAPI(title="H4 x Chk API", version="15.0")
 
 def get_browser_path():
     for name in ["chromium", "chromium-browser", "google-chrome", "chrome"]:
@@ -469,7 +471,7 @@ class LiveLogger:
 class JioReq(BaseModel):
     cc:str; mm:str; yy:str; cvv:str; mobile:str=""; user_id:int=0
 
-@api_app.post("/api/jio19")
+@app.post("/api/jio19")
 async def api_jio19(req: JioReq):
     if req.user_id and not has_access(req.user_id): raise HTTPException(403, "No key")
     if req.user_id and not consume_cc(req.user_id): raise HTTPException(429, "CC limit")
@@ -481,7 +483,7 @@ async def api_jio19(req: JioReq):
         elif r["status"] == "otp": bump_otp()
     return r
 
-@api_app.get("/")
+@app.get("/")
 async def root(): return {"status":"ok","bot":BOT_NAME}
 
 # ── UI ──
@@ -846,7 +848,7 @@ async def on_msg(update, ctx):
 
 # ── BOOT ──
 def run_api():
-    uvicorn.run(api_app, host="0.0.0.0", port=PORT, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
 
 def main():
     db_init()
@@ -857,26 +859,25 @@ def main():
     logger.info(f"🔍 Browser: {get_browser_path()} | HEADLESS: {HEADLESS} | PORT: {PORT}")
     Thread(target=run_api, daemon=True).start()
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("menu", cmd_menu))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("myinfo", cmd_myinfo))
-    app.add_handler(CommandHandlers("redeem" if False else "redeem", cmd_redeem))
-    app.add_handler(CommandHandler("redeem", cmd_redeem))
-    app.add_handler(CommandHandler("feedback", cmd_feedback))
-    app.add_handler(CommandHandler("jio", cmd_jio))
-    app.add_handler(CommandHandler("chk", cmd_chk))
-    app.add_handler(CommandHandler("Genkey" if False else "genkey", cmd_genkey))
-    app.add_handler(CommandHandler("ban", cmd_ban))
-    app.add_handler(CommandHandler("unban", cmd_unban))
-    app.add_handler(CommandHandler("botstats", cmd_botstats))
-    app.add_handler(CommandHandler("users", cmd_users))
-    app.add_handler(CallbackQueryHandler(on_cb))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), on_msg))
+    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
+    app_bot.add_handler(CommandHandler("start", cmd_start))
+    app_bot.add_handler(CommandHandler("menu", cmd_menu))
+    app_bot.add_handler(CommandHandler("help", cmd_help))
+    app_bot.add_handler(CommandHandler("myinfo", cmd_myinfo))
+    app_bot.add_handler(CommandHandler("redeem", cmd_redeem))
+    app_bot.add_handler(CommandHandler("feedback", cmd_feedback))
+    app_bot.add_handler(CommandHandler("jio", cmd_jio))
+    app_bot.add_handler(CommandHandler("chk", cmd_chk))
+    app_bot.add_handler(CommandHandler("genkey", cmd_genkey))
+    app_bot.add_handler(CommandHandler("ban", cmd_ban))
+    app_bot.add_handler(CommandHandler("unban", cmd_unban))
+    app_bot.add_handler(CommandHandler("botstats", cmd_botstats))
+    app_bot.add_handler(CommandHandler("users", cmd_users))
+    app_bot.add_handler(CallbackQueryHandler(on_cb))
+    app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), on_msg))
 
     logger.info(f"🚀 {BOT_NAME} starting...")
-    app.run_polling()
+    app_bot.run_polling()
 
 if __name__ == "__main__":
     main()
