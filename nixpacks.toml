@@ -1,44 +1,16 @@
 [phases.setup]
 nixPkgs = [
-    "python311",
-    "chromium",
-    "xvfb",
-    "nss",
-    "nspr",
-    "atk",
-    "at-spi2-atk",
-    "cups",
-    "libdrm",
-    "libxkbcommon",
-    "gtk3",
-    "mesa",
-    "alsa-lib",
-    "pango",
-    "cairo",
-    "libxcomposite",
-    "libxdamage",
-    "libxrandr",
-    "libxshmfence",
-    "libx11",
-    "libxcb",
-    "libxext",
-    "libxi",
-    "libxtst",
-    "libxfixes",
-    "libxcursor",
-    "glib",
-    "fontconfig",
-    "freetype",
-    "dejavu_fonts",
-    "noto-fonts",
-    "noto-fonts-emoji",
+    "python311", "chromium", "xvfb",
+    "nss", "nspr", "atk", "at-spi2-atk", "cups", "libdrm",
+    "libxkbcommon", "gtk3", "mesa", "alsa-lib", "pango", "cairo",
+    "libxcomposite", "libxdamage", "libxrandr", "libxshmfence",
+    "libx11", "libxcb", "libxext", "libxi", "libxtst", "libxfixes",
+    "libxcursor", "glib", "fontconfig", "freetype",
+    "dejavu_fonts", "noto-fonts", "noto-fonts-emoji",
 ]
 
 [phases.install]
-cmds = [
-    "pip install --upgrade pip",
-    "pip install -r requirements.txt",
-]
+cmds = ["pip install --upgrade pip", "pip install -r requirements.txt"]
 
 [start]
 cmd = "xvfb-run -a --server-args='-screen 0 1920x1080x24' python main.py"
