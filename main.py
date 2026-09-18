@@ -73,7 +73,6 @@ Date.prototype.getTimezoneOffset = function() { return -330; };
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger("h4xchk")
 
-# Changed api_app to app so uvicorn can find it as main:app
 app = FastAPI(title="H4 x Chk API", version="15.0")
 
 def get_browser_path():
@@ -847,18 +846,7 @@ async def on_msg(update, ctx):
     await live.finish(r["status"], r["response"], r["code"])
 
 # ── BOOT ──
-def run_api():
-    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
-
-def main():
-    db_init()
-    ensure_user(OWNER_ID, "whoh4rsh")
-    con = db(); cur = con.cursor()
-    cur.execute("UPDATE users SET role='owner' WHERE user_id=?", (OWNER_ID,))
-    con.commit(); con.close()
-    logger.info(f"🔍 Browser: {get_browser_path()} | HEADLESS: {HEADLESS} | PORT: {PORT}")
-    Thread(target=run_api, daemon=True).start()
-
+def run_bot():
     app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
     app_bot.add_handler(CommandHandler("start", cmd_start))
     app_bot.add_handler(CommandHandler("menu", cmd_menu))
@@ -876,8 +864,22 @@ def main():
     app_bot.add_handler(CallbackQueryHandler(on_cb))
     app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), on_msg))
 
-    logger.info(f"🚀 {BOT_NAME} starting...")
+    logger.info(f"🚀 {BOT_NAME} Telegram Bot starting...")
     app_bot.run_polling()
+
+def main():
+    db_init()
+    ensure_user(OWNER_ID, "whoh4rsh")
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE users SET role='owner' WHERE user_id=?", (OWNER_ID,))
+    con.commit(); con.close()
+    logger.info(f"🔍 Browser: {get_browser_path()} | HEADLESS: {HEADLESS} | PORT: {PORT}")
+    
+    # Telegram Bot running in background thread
+    Thread(target=run_bot, daemon=True).start()
+
+    # FastAPI running in main thread for Railway port binding
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
 
 if __name__ == "__main__":
     main()
